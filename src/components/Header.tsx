@@ -1,62 +1,55 @@
 "use client"
 
-import { Bell, FileText } from "lucide-react"
+import { Bell } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useApp } from "../context/AppContext"
 import { createClient } from "@supabase/supabase-js"
+import Image from "next/image" // Import component Image dari Next.js
 
-// Inisialisasi klien Supabase di luar komponen agar tidak dibuat ulang pada setiap render
+// Inisialisasi klien Supabase
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-// Hapus prop `userName` dan `userTitle` karena data akan diambil dari database
 export function Header({ userRole }: { userRole: string }) {
   const [showLogoutMenu, setShowLogoutMenu] = useState(false)
-  const [displayName, setDisplayName] = useState("Memuat...") // State untuk nama yang ditampilkan
-  const { dispatch, state } = useApp()
+  const [displayName, setDisplayName] = useState("Memuat...")
+  const { dispatch } = useApp()
 
   useEffect(() => {
     async function fetchUserProfile() {
-      // Periksa apakah pengguna sudah login
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Ambil data profil dari tabel 'profiles'
         const { data: profile, error } = await supabase
           .from("profiles")
           .select("full_name")
-          .eq("id", user.id) // Gunakan id pengguna untuk mencari data
+          .eq("id", user.id)
           .single()
 
         if (error) {
           console.error("Error fetching user profile:", error)
-          // Gunakan email atau nama dari state sebagai cadangan jika pengambilan data gagal
           setDisplayName(user.email || "User")
         } else {
-          // Atur `displayName` dengan `full_name` dari database
           setDisplayName(profile.full_name)
         }
       } else {
-        // Atur nama default jika tidak ada pengguna yang login
         setDisplayName("User")
       }
     }
 
     fetchUserProfile()
-  }, []) // Jalankan hanya sekali saat komponen dimuat
+  }, [])
 
   const handleLogout = () => {
     dispatch({ type: "LOGOUT" })
     setShowLogoutMenu(false)
   }
 
-  // Gunakan `displayName` sebagai nama yang aman untuk ditampilkan
   const safeUserName = displayName
   const safeUserRole = userRole || "Role"
   const displayTitle = safeUserRole
 
-  // Buat inisial dari nama yang ditampilkan
   const userInitials =
     safeUserName
       .split(" ")
@@ -68,15 +61,26 @@ export function Header({ userRole }: { userRole: string }) {
     <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2 sm:space-x-4">
-          <div className="bg-blue-500 p-2 rounded-lg">
-            <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+
+          {/* --- BAGIAN LOGO DIPERBARUI --- */}
+          <div className="relative flex-shrink-0">
+            <Image
+              src="/Logo SDMO x1.png" // Mengarah ke folder public
+              alt="Logo SDMO"
+              width={48} // Sesuaikan ukuran (w-12 setara 48px)
+              height={48}
+              className="w-10 h-10 sm:w-12 sm:h-12 object-contain"
+              priority
+            />
           </div>
+          {/* ----------------------------- */}
+
           <div className="hidden sm:block">
             <h1 className="text-xl font-bold text-gray-900">WORKFLOW SDMO - Alur Proses Administrasi</h1>
             <p className="text-sm text-gray-600">Sistem Tracking Surat</p>
           </div>
           <div className="sm:hidden">
-            <h1 className="text-lg font-bold text-gray-900">WORKFLOW SDMO - Alur Proses Administrasi</h1>
+            <h1 className="text-lg font-bold text-gray-900">WORKFLOW SDMO</h1>
           </div>
         </div>
 

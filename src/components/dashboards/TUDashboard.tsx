@@ -1,7 +1,9 @@
 "use client"
-import { useState, useEffect } from "react"
+
+import { useState, useEffect, useMemo } from "react"
 import { useApp } from "../../context/AppContext"
-import { SERVICES, Report, User } from "../../types"
+// Pastikan SUB_SERVICES_MAP diimport dari types
+import { SERVICES, SUB_SERVICES_MAP, Report, User } from "../../types"
 import { supabase } from "@/lib/supabaseClient.js"
 import { toast } from "../../../lib/toast";
 import {
@@ -27,41 +29,61 @@ import {
 } from "lucide-react"
 import { ReportForm } from "../forms/ReportForm"
 import { ForwardForm } from "../forms/ForwardForm"
+
 export function TUDashboard() {
   const { state, dispatch } = useApp()
   const { reports, users: profiles, currentUser } = state
+
   const [showReportForm, setShowReportForm] = useState(false)
   const [showForwardForm, setShowForwardForm] = useState(false)
   const [editingReport, setEditingReport] = useState<Report | null>(null)
   const [forwardingReport, setForwardingReport] = useState<Report | null>(null)
+
   const [searchQuery, setSearchQuery] = useState("")
-  const [serviceFilter, setServiceFilter] = useState("")
+  const [serviceFilter, setServiceFilter] = useState("") // Filter state
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null)
   const [currentTime, setCurrentTime] = useState(new Date())
+
+  // State untuk tracking dan finalisasi
   const [trackingQuery, setTrackingQuery] = useState("")
   const [trackingResult, setTrackingResult] = useState<any | null>(null)
   const [isTracking, setIsTracking] = useState(false)
   const [finalizingId, setFinalizingId] = useState<string | null>(null);
+
   // State untuk modal detail dan staff tasks
   const [viewingReport, setViewingReport] = useState<Report | null>(null);
   const [staffTasks, setStaffTasks] = useState<{ id: string, staffName: string, fileUrl: string | null }[]>([]);
   const [isFileLoading, setIsFileLoading] = useState(false);
+
   const statusMap: { [key: string]: string } = {
     'draft': 'Draft',
     'in-progress': 'Dalam Proses',
     'completed': 'Selesai',
     'revision-required': 'Revisi',
     'pending-approval-tu': 'Review Koordinator Selesai',
+    'forwarded-to-coordinator': 'Diteruskan ke Koordinator',
+    'returned': 'Dikembalikan'
   };
+
+  // --- LOGIKA FILTER BARU ---
+  // Menggabungkan semua detail layanan dari SUB_SERVICES_MAP menjadi satu array list
+  const allServiceDetails = useMemo(() => {
+    const details = Object.values(SUB_SERVICES_MAP).flat();
+    // Urutkan abjad agar mudah dicari
+    return details.sort((a, b) => a.localeCompare(b));
+  }, []);
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
+
   // useEffect untuk fetch staff files ketika viewingReport berubah
   useEffect(() => {
     const fetchStaffFiles = async () => {
       setStaffTasks([]);
       if (!viewingReport) return;
+
       setIsFileLoading(true);
       try {
         const { data: tasksData, error } = await supabase
@@ -69,6 +91,7 @@ export function TUDashboard() {
           .select('id, staff_id, file_path, revised_file_path')
           .eq('report_id', (viewingReport as any).id)
           .order('created_at', { ascending: false });
+
         if (error) {
           console.error("Error fetching tasks:", error);
         } else if (tasksData && tasksData.length > 0) {
@@ -76,9 +99,11 @@ export function TUDashboard() {
             // Cari nama staff
             const staffProfile = profiles.find(p => p.id === task.staff_id);
             const staffName = staffProfile?.full_name || staffProfile?.name || "Staff Tidak Dikenali";
+
             // Tentukan path file (prioritas: revised_file_path > file_path)
             let rawPath = null;
             let targetBucket = 'revised_documents';
+
             if (task.revised_file_path) {
               rawPath = task.revised_file_path;
               targetBucket = 'revised_documents';
@@ -86,6 +111,7 @@ export function TUDashboard() {
               rawPath = task.file_path;
               targetBucket = 'documents';
             }
+
             let fileUrl = null;
             if (rawPath) {
               // Bersihkan path
@@ -93,12 +119,15 @@ export function TUDashboard() {
               if (cleanPath.startsWith('/')) {
                 cleanPath = cleanPath.substring(1);
               }
+
               // Generate URL
               const { data: storageData } = supabase.storage
                 .from(targetBucket)
                 .getPublicUrl(cleanPath);
+
               fileUrl = storageData.publicUrl;
             }
+
             return {
               id: task.id,
               staffName,
@@ -113,29 +142,36 @@ export function TUDashboard() {
         setIsFileLoading(false);
       }
     };
+
     fetchStaffFiles();
   }, [viewingReport, profiles]);
+
   const getProfileName = (profileId: string) => {
     if (!profileId) return "Sistem";
     const profile = profiles.find((p) => p.id === profileId || (p as any).user_id === profileId)
     return profile?.full_name || profile?.name || "ID Tidak Dikenali"
   }
+
   const formatDateTime = (dateString: string) => {
     try {
       if (!dateString) return "-";
       return new Date(dateString).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
     } catch (e) { return "Tanggal Tidak Valid"; }
   };
+
   const handleFinalizeReport = async (report: Report) => {
     if (!report || !currentUser) return;
     if (!window.confirm(`Anda yakin ingin menyelesaikan dan mengarsipkan laporan "${report.hal}"?`)) return;
+
     setFinalizingId((report as any).id);
     try {
       const { error: updateError } = await supabase
         .from('reports')
         .update({ status: 'completed', current_holder: null })
         .eq('id', (report as any).id);
+
       if (updateError) throw updateError;
+
       await supabase.from('workflow_history').insert({
         report_id: (report as any).id,
         action: 'Laporan diselesaikan oleh TU',
@@ -143,6 +179,7 @@ export function TUDashboard() {
         status: 'completed',
         notes: 'Laporan telah final dan diarsipkan.'
       });
+
       toast.success("Laporan telah diselesaikan.");
       if (dispatch) dispatch({ type: 'FETCH_REPORTS' });
     } catch (error: any) {
@@ -151,9 +188,11 @@ export function TUDashboard() {
       setFinalizingId(null);
     }
   };
+
   const handleReportSubmit = async (reportData: any) => {
     if (!currentUser) return;
     const reportCreatorId = (currentUser as any).user_id || currentUser.id;
+
     const reportToSave = {
       no_surat: reportData.noSurat || `NS-${Date.now()}`,
       layanan: reportData.layanan,
@@ -162,6 +201,7 @@ export function TUDashboard() {
       status: "draft",
       created_by: reportCreatorId,
     };
+
     if (editingReport) {
       await supabase.from("reports").update({ ...reportToSave, updated_at: new Date().toISOString() }).eq("id", editingReport.id);
     } else {
@@ -171,6 +211,7 @@ export function TUDashboard() {
     setEditingReport(null);
     if (dispatch) dispatch({ type: 'FETCH_REPORTS' });
   };
+
   const handleDeleteReport = async (reportId: string) => {
     if (confirm("Apakah Anda yakin ingin menghapus laporan ini?")) {
       await supabase.from("reports").delete().eq("id", reportId);
@@ -178,14 +219,18 @@ export function TUDashboard() {
     }
     setOpenActionMenu(null);
   };
+
   const handleForwardSubmit = async (forwardData: any) => {
     if (!forwardingReport || !currentUser) return;
+
     const coordinatorName = forwardData.coordinators[0];
     const coordinatorProfile = profiles.find(p => p.full_name === coordinatorName || p.name === coordinatorName);
+
     if (!coordinatorProfile) {
       toast.error(`Koordinator "${coordinatorName}" tidak ditemukan.`);
       return;
     }
+
     await supabase
       .from("reports")
       .update({
@@ -193,6 +238,7 @@ export function TUDashboard() {
         status: 'in-progress'
       })
       .eq("id", forwardingReport.id);
+
     await supabase.from("workflow_history").insert([{
       report_id: forwardingReport.id,
       action: "laporan di teruskan",
@@ -200,25 +246,36 @@ export function TUDashboard() {
       user_id: (currentUser as any).user_id || currentUser.id,
       status: "in-progress"
     }]);
+
     toast.success(`Laporan berhasil diteruskan ke ${coordinatorProfile.full_name || coordinatorProfile.name}.`);
     setShowForwardForm(false);
     setForwardingReport(null);
     if (dispatch) dispatch({ type: 'FETCH_REPORTS' });
   };
-  const getReportProgress = (report: Report) => {
-    return 50;
-  };
-  const getProgressColor = (progress: number) => "bg-blue-500";
+
   const reportsForFinalization = reports.filter(report => report.status === 'pending-approval-tu');
+
+  // --- FILTERING REPORTS ---
   const filteredReports = reports.filter((report) => {
+    // Exclude 'pending-approval-tu' karena ada di section atas
     if (report.status === 'pending-approval-tu') return false;
-    const matchesService = !serviceFilter || report.layanan === serviceFilter;
+
+    // Filter by Service (Cek layanan OR sub_layanan)
+    // Jika filter kosong (""), maka tampilkan semua
+    const matchesService =
+      serviceFilter === "" ||
+      report.layanan === serviceFilter ||
+      report.sub_layanan === serviceFilter;
+
+    // Filter by Search
     const matchesSearch =
       !searchQuery ||
       report.hal?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       report.no_surat?.toLowerCase().includes(searchQuery.toLowerCase());
+
     return matchesService && matchesSearch;
   });
+
   const stats = {
     totalLaporan: reports.length,
     menungguVerifikasi: reports.filter((r) => r.status === "draft").length,
@@ -226,6 +283,7 @@ export function TUDashboard() {
     selesai: reports.filter((r) => r.status === "completed").length,
     dikembalikan: reports.filter((r) => r.status === "revision-required").length,
   };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "completed": return "bg-green-100 text-green-800";
@@ -236,12 +294,19 @@ export function TUDashboard() {
       default: return "bg-gray-100 text-gray-800";
     }
   };
+
   const handleLogout = () => dispatch({ type: "LOGOUT" });
-  const resetFilters = () => { setSearchQuery(""); setServiceFilter(""); };
+
+  const resetFilters = () => {
+    setSearchQuery("");
+    setServiceFilter("");
+  };
+
   const { date } = (() => {
     const d = new Date(currentTime);
     return { date: d.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) };
   })();
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -271,12 +336,14 @@ export function TUDashboard() {
           </div>
         </div>
       </div>
+
       {/* Konten Utama */}
       <div className="p-4 sm:p-6">
         <div className="mb-6 sm:mb-8">
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Manajemen Laporan Kepegawaian</h2>
           <p className="text-sm sm:text-base text-gray-600">Kelola pengajuan dan laporan kepegawaian</p>
         </div>
+
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6 flex items-center gap-4">
@@ -296,6 +363,7 @@ export function TUDashboard() {
             <div><div className="text-2xl font-bold text-gray-900">{stats.selesai}</div><div className="text-sm text-gray-500">Selesai</div></div>
           </div>
         </div>
+
         {/* Bagian untuk Finalisasi */}
         {reportsForFinalization.length > 0 && (
           <div className="mb-8">
@@ -320,30 +388,59 @@ export function TUDashboard() {
             </div>
           </div>
         )}
+
         <div className="flex justify-end mb-4">
           <button onClick={() => { setEditingReport(null); setShowReportForm(true); }} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm sm:text-base">
             <Plus className="w-4 h-4" />
             Buat Laporan Baru
           </button>
         </div>
+
         {/* Tabel Laporan Utama */}
         <div className="bg-white rounded-lg shadow-sm border">
           <div className="p-4 sm:p-6 border-b border-gray-200">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               <div className="relative sm:col-span-2 lg:col-span-1">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder="Cari..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm" />
+                <input
+                  type="text"
+                  placeholder="Cari No Surat / Perihal..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm"
+                />
               </div>
-              <select value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} className="border rounded-lg text-sm">
+
+              {/* DROPDOWN FILTER LAYANAN YANG DIPERBARUI */}
+              <select
+                value={serviceFilter}
+                onChange={(e) => setServiceFilter(e.target.value)}
+                className="border rounded-lg text-sm px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+              >
                 <option value="">Semua Layanan</option>
-                {SERVICES.map((service) => (<option key={service} value={service}>{service}</option>))}
+
+                {/* Group untuk Detail Layanan */}
+                <optgroup label="Detail Layanan">
+                  {allServiceDetails.map((service, index) => (
+                    <option key={`detail-${index}`} value={service}>{service}</option>
+                  ))}
+                </optgroup>
+
+                {/* Group untuk Kategori Utama (Optional, jaga-jaga) */}
+                <optgroup label="Kategori Utama">
+                  {SERVICES.map((cat, index) => (
+                    <option key={`cat-${index}`} value={cat}>{cat}</option>
+                  ))}
+                </optgroup>
               </select>
+
               <button onClick={resetFilters} className="flex items-center justify-center gap-2 px-4 py-2 text-gray-600 border rounded-lg hover:bg-gray-50 text-sm">
                 <Filter className="w-4 h-4" />
                 <span>Reset Filter</span>
               </button>
             </div>
           </div>
+
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead className="bg-gray-50">
@@ -359,12 +456,18 @@ export function TUDashboard() {
                 {filteredReports.map((report) => (
                   <tr key={(report as any).id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{report.no_surat || "-"}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{report.layanan || "-"}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      {/* Tampilkan sub_layanan jika ada, jika tidak tampilkan layanan */}
+                      {report.sub_layanan || report.layanan || "-"}
+                    </td>
                     <td className="px-6 py-4 text-sm text-gray-500 hidden lg:table-cell">{getProfileName((report as any).created_by)}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{formatDateTime((report as any).created_at)}</td>
                     <td className="px-6 py-4 text-sm font-medium">
                       <div className="flex items-center gap-2 relative">
-                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(report.status)}`}>{statusMap[report.status as keyof typeof statusMap] || report.status}</span>
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(report.status)}`}>
+                          {statusMap[report.status as keyof typeof statusMap] || report.status}
+                        </span>
+
                         {/* Tombol Eye untuk status completed */}
                         {report.status === 'completed' && (
                           <button
@@ -375,6 +478,7 @@ export function TUDashboard() {
                             <Eye className="w-4 h-4" />
                           </button>
                         )}
+
                         <div className="relative">
                           <button onClick={() => setOpenActionMenu(openActionMenu === (report as any).id ? null : (report as any).id)} className="text-gray-600 hover:text-gray-900 p-1 rounded hover:bg-gray-100" title="Menu Lainnya"><MoreHorizontal className="w-4 h-4" /></button>
                           {openActionMenu === (report as any).id && (
@@ -392,13 +496,14 @@ export function TUDashboard() {
                   </tr>
                 ))}
                 {filteredReports.length === 0 && (
-                  <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500 text-sm">Tidak ada laporan yang sesuai.</td></tr>
+                  <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500 text-sm">Tidak ada laporan yang sesuai.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
         </div>
       </div>
+
       {/* MODAL: LIHAT DETAIL HASIL SURAT */}
       {viewingReport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -416,6 +521,7 @@ export function TUDashboard() {
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
+
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -428,6 +534,12 @@ export function TUDashboard() {
                         <p className="text-xs text-gray-500 mb-1">Layanan</p>
                         <p className="font-medium text-gray-900">{viewingReport.layanan}</p>
                       </div>
+                      {viewingReport.sub_layanan && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Detail Layanan</p>
+                          <p className="font-medium text-gray-900">{viewingReport.sub_layanan}</p>
+                        </div>
+                      )}
                       <div>
                         <p className="text-xs text-gray-500 mb-1">Dari</p>
                         <p className="font-medium text-gray-900">
@@ -445,6 +557,7 @@ export function TUDashboard() {
                     </div>
                   </div>
                 </div>
+
                 {/* KANAN: Dokumen Staff (Multiple Staff Support) */}
                 <div className="flex flex-col h-full">
                   <h4 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Dokumen Staff</h4>
@@ -489,6 +602,7 @@ export function TUDashboard() {
                 </div>
               </div>
             </div>
+
             {/* Modal Footer */}
             <div className="bg-gray-50 px-6 py-4 border-t flex justify-end">
               <button
@@ -501,6 +615,7 @@ export function TUDashboard() {
           </div>
         </div>
       )}
+
       {/* Modals */}
       {showReportForm && (<ReportForm report={editingReport} onSubmit={handleReportSubmit} onCancel={() => { setShowReportForm(false); setEditingReport(null); }} />)}
       {showForwardForm && (<ForwardForm report={forwardingReport} profiles={profiles} onSubmit={handleForwardSubmit} onCancel={() => { setShowForwardForm(false); setForwardingReport(null); }} />)}

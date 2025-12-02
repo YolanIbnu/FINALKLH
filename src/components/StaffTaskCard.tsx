@@ -9,7 +9,7 @@ export function StaffTaskCard({ task, onSelect, isSelected }) {
     >
       <div className="flex justify-between items-center">
         <p className="font-semibold text-gray-900">{task.reports?.no_surat || "Tanpa No. Surat"}</p>
-        
+
         {/* Tanda REVISI hanya muncul jika statusnya revision-required */}
         {task.status === 'revision-required' && (
           <span className="text-xs font-medium px-2 py-1 bg-red-100 text-red-800 rounded-full">

@@ -5,14 +5,25 @@ import { useApp } from "../../context/AppContext"
 import { supabase } from "../../../lib/supabaseClient"
 import { toast } from "../../../lib/toast";
 import {
-  Filter, UserPlus, AlertTriangle, FileText, Clock,
+  UserPlus, AlertTriangle, FileText, Clock,
   CheckCircle, Search, Eye, LogOut, Send, XCircle, Calendar,
   Check, X, Download,
 } from "lucide-react"
-import { Report, SERVICES } from "../../types"
+// Pastikan SUB_SERVICES_MAP dan SERVICES diimport dari types
+import { Report, SERVICES, SUB_SERVICES_MAP } from "../../types"
 import { ReportDetailsModal } from "../modals/ReportDetailsModal"
 import { AddStaffModal } from "../modals/AddStaffModal"
 import { RevisionModal } from "../modals/RevisionModal"
+
+// --- KONFIGURASI SPESIALISASI KOORDINATOR ---
+// Menentukan kategori utama berdasarkan nama akun yang login
+const COORDINATOR_SPECIALIZATION: Record<string, string> = {
+  "Suwarti": "Administrasi Kepegawaian",
+  "Ahmad Toto": "Pengelolaan Jabatan Fungsional",
+  "Achmad Evianto": "Pengelolaan Jabatan Fungsional", // Alternatif jika nama di DB berbeda
+  "Yosi Yosandi": "Perencanaan dan pengembangan SDM",
+  "Adi Sulaksono": "Organisasi dan Tata Laksana",
+};
 
 // --- Tipe data lokal untuk TaskAssignment ---
 type TaskAssignment = {
@@ -33,7 +44,7 @@ type LocalReport = Omit<Report, 'task_assignments'> & {
 // ====================================================================
 // === KOMPONEN: SignedFileDownloader (Untuk link aman) ===
 // ====================================================================
-function SignedFileDownloader({ filePath, cleanPath }: { filePath: string, cleanPath: string }) {
+function SignedFileDownloader({ filePath, bucketName = 'revised_documents' }: { filePath: string, bucketName?: string }) {
   const [signedUrl, setSignedUrl] = useState<string>('#');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +52,6 @@ function SignedFileDownloader({ filePath, cleanPath }: { filePath: string, clean
   useEffect(() => {
     if (!filePath) {
       setIsLoading(false);
-      setError("No file path provided.");
       return;
     }
 
@@ -49,11 +59,10 @@ function SignedFileDownloader({ filePath, cleanPath }: { filePath: string, clean
       setIsLoading(true);
       setError(null);
 
-      // Membuat link yang aman dan valid selama 60 detik
       const { data, error } = await supabase.storage
-        .from('revised_documents')
-        .createSignedUrl(cleanPath, 60, {
-          download: true // Paksa URL untuk mengunduh
+        .from(bucketName)
+        .createSignedUrl(filePath, 3600, {
+          download: true
         });
 
       if (error) {
@@ -67,11 +76,11 @@ function SignedFileDownloader({ filePath, cleanPath }: { filePath: string, clean
     }
 
     getSignedUrl();
-  }, [filePath, cleanPath]); // Jalankan ulang jika path berubah
+  }, [filePath, bucketName]);
 
   if (isLoading) {
     return (
-      <span className="inline-flex items-center gap-2 px-3 py-2 mt-3 text-sm bg-gray-400 text-white rounded-lg">
+      <span className="inline-flex items-center gap-2 px-3 py-2 mt-3 text-sm bg-gray-100 text-gray-500 rounded-lg">
         <Clock className="w-4 h-4 animate-spin" />
         Memuat link...
       </span>
@@ -80,31 +89,28 @@ function SignedFileDownloader({ filePath, cleanPath }: { filePath: string, clean
 
   if (error) {
     return (
-      <span className="inline-flex items-center gap-2 px-3 py-2 mt-3 text-sm bg-red-100 text-red-700 rounded-lg">
+      <span className="inline-flex items-center gap-2 px-3 py-2 mt-3 text-sm bg-red-50 text-red-600 rounded-lg">
         <AlertTriangle className="w-4 h-4" />
         {error}
       </span>
     );
   }
 
-  // Ekstrak nama file dari path untuk atribut download
-  const fileName = cleanPath.split('/').pop() || 'file_revisi';
-
   return (
     <a
       href={signedUrl}
+      target="_blank"
       rel="noopener noreferrer"
-      download={fileName} // Tambahkan atribut 'download'
-      className="inline-flex items-center gap-2 px-3 py-2 mt-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+      className="inline-flex items-center gap-2 px-3 py-2 mt-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
     >
       <Download className="w-4 h-4" />
-      Lihat File Revisi
+      Download File
     </a>
   );
 }
 
 // ====================================================================
-// === KOMPONEN MODAL REVIEW REVISI ===
+// === KOMPONEN MODAL: REVIEW REVISI (TAHAP 1 - CYAN) ===
 // ====================================================================
 function ReviewRevisionModal({ report, profiles, onClose, onApprove, onReject }: {
   report: LocalReport,
@@ -117,18 +123,13 @@ function ReviewRevisionModal({ report, profiles, onClose, onApprove, onReject }:
   const [isApproving, setIsApproving] = useState(false);
 
   const tasksToReview = report.task_assignments.filter(
-    task => task.status === 'pending-review'
+    task => task.status === 'completed' && task.revised_file_path
   );
 
   const getProfileName = (staffId: string) => {
     const profile = profiles.find(p => p.id === staffId);
     return profile?.full_name || "Staff Tidak Dikenali";
   }
-  const getCleanPath = (filePath: string) => {
-    if (!filePath) return '';
-    return filePath; // Langsung kembalikan path apa adanya
-  }
-  // --- Fungsi ini sekarang HANYA membersihkan path ---
 
   const handleApprove = async () => {
     setIsApproving(true);
@@ -137,77 +138,85 @@ function ReviewRevisionModal({ report, profiles, onClose, onApprove, onReject }:
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between p-6 border-b">
-          <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <CheckCircle className="text-blue-500" /> Review Hasil Revisi Staff
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between p-6 border-b bg-gray-50">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <CheckCircle className="text-blue-600 w-5 h-5" /> Review Hasil Revisi Staff
           </h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X /></button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="w-6 h-6" />
+          </button>
         </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto">
-          <div className="mb-2">
-            <p className="font-medium text-gray-900">{report.hal}</p>
-            <p className="text-sm text-gray-500">{report.no_surat}</p>
+        <div className="p-6 space-y-6 overflow-y-auto">
+          <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+            <p className="font-semibold text-blue-900">{report.hal}</p>
+            <p className="text-sm text-blue-700 mt-1">No. Surat: {report.no_surat}</p>
           </div>
 
-          <h4 className="font-semibold text-gray-700">File Revisi dari Staff:</h4>
+          <h4 className="font-semibold text-gray-800 border-b pb-2">File Revisi Terbaru:</h4>
 
           {tasksToReview.length > 0 ? (
             <div className="space-y-4">
-              {tasksToReview.map(task => {
-                // Dapatkan path yang bersih
-                const cleanFilePath = getCleanPath(task.revised_file_path || '');
-
-                return (
-                  <div key={task.id} className="border rounded-lg p-4 bg-gray-50">
-                    <p className="text-sm font-medium text-gray-800">
+              {tasksToReview.map(task => (
+                <div key={task.id} className="border border-gray-200 rounded-lg p-5 bg-white shadow-sm">
+                  <div className="flex justify-between items-start mb-3">
+                    <p className="text-sm font-semibold text-gray-900">
                       Oleh: {getProfileName(task.staff_id)}
                     </p>
+                    <span className="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-full border border-purple-200 font-medium">
+                      Revisi Masuk
+                    </span>
+                  </div>
 
-                    {/* Catatan dari Staff */}
-                    {task.staff_revision_notes && (
-                      <div className="mt-2">
-                        <label className="text-xs font-medium text-gray-500">Catatan Staff:</label>
-                        <p className="text-sm text-gray-700 p-2 bg-white border rounded-md whitespace-pre-wrap">
-                          {task.staff_revision_notes}
-                        </p>
-                      </div>
-                    )}
+                  {task.staff_revision_notes && (
+                    <div className="mb-4">
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Catatan Staff:</label>
+                      <p className="text-sm text-gray-700 mt-1 p-3 bg-gray-50 border rounded-md whitespace-pre-wrap">
+                        {task.staff_revision_notes}
+                      </p>
+                    </div>
+                  )}
 
-                    {/* --- Link File (Menggunakan komponen baru) --- */}
+                  <div className="mt-2">
+                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Lampiran File:</label>
                     {task.revised_file_path ? (
                       <SignedFileDownloader
                         filePath={task.revised_file_path}
-                        cleanPath={cleanFilePath}
+                        bucketName="revised_documents"
                       />
                     ) : (
-                      <p className="text-sm text-red-500 mt-2">Staff tidak melampirkan file.</p>
+                      <p className="text-sm text-red-500 flex items-center gap-1">
+                        <AlertTriangle className="w-4 h-4" /> Staff tidak melampirkan file.
+                      </p>
                     )}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           ) : (
-            <p className="text-gray-500">Tidak ada file revisi yang ditemukan.</p>
+            <div className="text-center py-8 bg-gray-50 rounded-lg border border-dashed">
+              <p className="text-gray-500">Tidak ada file revisi yang ditemukan.</p>
+            </div>
           )}
         </div>
 
         <div className="flex justify-end gap-3 p-6 bg-gray-50 border-t">
           <button
             onClick={() => onReject(report)}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+            className="px-5 py-2.5 bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 hover:border-red-300 font-medium transition-colors flex items-center gap-2"
           >
-            <AlertTriangle className="w-4 h-4" /> Tolak & Kirim Revisi Ulang
+            <XCircle className="w-4 h-4" /> Tolak & Revisi Ulang
           </button>
+
           <button
             onClick={handleApprove}
             disabled={isApproving}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 flex items-center gap-2"
+            className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors shadow-sm flex items-center gap-2 disabled:bg-blue-400"
           >
-            <Check className="w-4 h-4" />
-            {isApproving ? 'Menyetujui...' : 'Setujui Revisi Ini'}
+            {isApproving ? <Clock className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            {isApproving ? 'Memproses...' : 'Setujui Revisi (Lanjut Review Akhir)'}
           </button>
         </div>
       </div>
@@ -216,7 +225,7 @@ function ReviewRevisionModal({ report, profiles, onClose, onApprove, onReject }:
 }
 
 // ====================================================================
-// === KOMPONEN MODAL REVIEW TUGAS (BARU) ===
+// === KOMPONEN MODAL: REVIEW TUGAS REGULAR/AKHIR (TAHAP 2 - ORANGE) ===
 // ====================================================================
 function ReviewTaskModal({ report, profiles, onClose, onApprove, onReject }: {
   report: LocalReport,
@@ -228,19 +237,14 @@ function ReviewTaskModal({ report, profiles, onClose, onApprove, onReject }: {
 
   const [isApproving, setIsApproving] = useState(false);
 
-  // Filter tugas yang statusnya 'completed' (karena ini review untuk tugas yang baru selesai dikerjakan staff)
-  // Atau bisa juga kita anggap semua tugas di report ini perlu direview jika status reportnya 'pending-review-baru'
+  // LOGIC FILTER: Tampilkan tugas yang 'completed' (kerjaan biasa) ATAU 'pending-review' (revisi yang sudah disetujui)
   const tasksToReview = report.task_assignments.filter(
-    task => task.status === 'completed'
+    task => task.status === 'completed' || task.status === 'pending-review'
   );
 
   const getProfileName = (staffId: string) => {
     const profile = profiles.find(p => p.id === staffId);
     return profile?.full_name || "Staff Tidak Dikenali";
-  }
-  const getCleanPath = (filePath: string) => {
-    if (!filePath) return '';
-    return filePath;
   }
 
   const handleApprove = async () => {
@@ -250,22 +254,22 @@ function ReviewTaskModal({ report, profiles, onClose, onApprove, onReject }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between p-6 border-b">
-          <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <CheckCircle className="text-blue-500" /> Review Hasil Pekerjaan Staff
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between p-6 border-b bg-gray-50">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <CheckCircle className="text-green-600 w-5 h-5" /> Review Akhir Hasil Pekerjaan
           </h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X /></button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors"><X className="w-6 h-6" /></button>
         </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto">
-          <div className="mb-2">
-            <p className="font-medium text-gray-900">{report.hal}</p>
-            <p className="text-sm text-gray-500">{report.no_surat}</p>
+        <div className="p-6 space-y-6 overflow-y-auto">
+          <div className="bg-green-50 p-4 rounded-lg border border-green-100">
+            <p className="font-semibold text-green-900">{report.hal}</p>
+            <p className="text-sm text-green-700 mt-1">No. Surat: {report.no_surat}</p>
           </div>
 
-          <h4 className="font-semibold text-gray-700">File Pekerjaan dari Staff:</h4>
+          <h4 className="font-semibold text-gray-800 border-b pb-2">Semua File Pekerjaan:</h4>
 
           {tasksToReview.length > 0 ? (
             <div className="space-y-4">
@@ -273,78 +277,75 @@ function ReviewTaskModal({ report, profiles, onClose, onApprove, onReject }: {
                 const isRevision = !!task.revised_file_path;
                 const displayFilePath = isRevision ? task.revised_file_path : task.file_path;
                 const displayNotes = isRevision ? task.staff_revision_notes : task.Staff_notes;
-                const cleanFilePath = getCleanPath(displayFilePath || '');
+                // Jika isRevision, pakai bucket revisi, jika tidak, pakai documents
+                const bucketName = isRevision ? "revised_documents" : "documents";
 
                 return (
-                  <div key={task.id} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="flex justify-between items-start">
-                      <p className="text-sm font-medium text-gray-800">
+                  <div key={task.id} className="border border-gray-200 rounded-lg p-5 bg-white shadow-sm">
+                    <div className="flex justify-between items-start mb-3">
+                      <p className="text-sm font-semibold text-gray-900">
                         Oleh: {getProfileName(task.staff_id)}
                       </p>
-                      {isRevision && (
-                        <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 rounded-full border border-purple-200">
-                          Hasil Revisi
+                      {isRevision ? (
+                        <span className="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-700 rounded-full border border-purple-200">
+                          Hasil Revisi (Disetujui)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full border border-green-200">
+                          Pekerjaan Original
                         </span>
                       )}
                     </div>
 
-                    {/* Catatan */}
                     {displayNotes && (
-                      <div className="mt-2">
-                        <label className="text-xs font-medium text-gray-500">
-                          {isRevision ? "Catatan Revisi Staff:" : "Catatan Staff:"}
+                      <div className="mb-4">
+                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">
+                          {isRevision ? "Catatan Revisi:" : "Catatan Staff:"}
                         </label>
-                        <p className="text-sm text-gray-700 p-2 bg-white border rounded-md whitespace-pre-wrap">
+                        <p className="text-sm text-gray-700 p-3 bg-gray-50 border rounded-md whitespace-pre-wrap">
                           {displayNotes}
                         </p>
                       </div>
                     )}
 
-                    {/* --- Link File --- */}
-                    {displayFilePath ? (
-                      <div className="mt-3">
-                        {isRevision ? (
-                          <SignedFileDownloader
-                            filePath={displayFilePath}
-                            cleanPath={cleanFilePath}
-                          />
-                        ) : (
-                          <a
-                            href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/documents/${cleanFilePath}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                          >
-                            <Download className="w-4 h-4" /> Download File Pekerjaan
-                          </a>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-red-500 mt-2">Staff tidak melampirkan file.</p>
-                    )}
+                    <div className="mt-2">
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Lampiran File:</label>
+                      {displayFilePath ? (
+                        <SignedFileDownloader
+                          filePath={displayFilePath}
+                          bucketName={bucketName}
+                        />
+                      ) : (
+                        <p className="text-sm text-red-500 flex items-center gap-1">
+                          <AlertTriangle className="w-4 h-4" /> Staff tidak melampirkan file.
+                        </p>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <p className="text-gray-500">Tidak ada pekerjaan yang ditemukan.</p>
+            <div className="text-center py-8 bg-gray-50 rounded-lg border border-dashed">
+              <p className="text-gray-500">Tidak ada pekerjaan yang ditemukan.</p>
+            </div>
           )}
         </div>
 
         <div className="flex justify-end gap-3 p-6 bg-gray-50 border-t">
           <button
             onClick={() => onReject(report)}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2"
+            className="px-5 py-2.5 bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 hover:border-red-300 font-medium transition-colors flex items-center gap-2"
           >
             <AlertTriangle className="w-4 h-4" /> Tolak & Minta Revisi
           </button>
           <button
             onClick={handleApprove}
             disabled={isApproving}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 flex items-center gap-2"
+            className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors shadow-sm flex items-center gap-2 disabled:bg-green-400"
           >
-            <Check className="w-4 h-4" />
-            {isApproving ? 'Menyetujui...' : 'Setujui & Teruskan ke TU'}
+            {isApproving ? <Clock className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {isApproving ? 'Memproses...' : 'Setujui & Teruskan ke TU'}
           </button>
         </div>
       </div>
@@ -370,6 +371,7 @@ export function CoordinatorDashboard() {
   const [selectedReport, setSelectedReport] = useState<LocalReport | null>(null)
   const [addStaffReport, setAddStaffReport] = useState<LocalReport | null>(null)
   const [revisionReport, setRevisionReport] = useState<LocalReport | null>(null)
+
   const [reviewRevisionReport, setReviewRevisionReport] = useState<LocalReport | null>(null)
   const [reviewTaskReport, setReviewTaskReport] = useState<LocalReport | null>(null)
 
@@ -439,30 +441,30 @@ export function CoordinatorDashboard() {
   const handleApproveRevisions = async (report: LocalReport) => {
     try {
       const tasksToApprove = report.task_assignments
-        .filter(a => a.status === 'pending-review')
+        .filter(a => a.status === 'completed' && a.revised_file_path)
         .map(a => a.id);
 
       if (tasksToApprove.length === 0) {
-        toast.warning("Tidak ada revisi untuk disetujui.");
+        toast.warning("Data revisi tidak ditemukan valid.");
         return;
       }
 
-      const { error } = await supabase
+      const { error: updateTaskError } = await supabase
         .from('task_assignments')
-        .update({ status: 'completed' })
+        .update({ status: 'pending-review' })
         .in('id', tasksToApprove);
 
-      if (error) throw error;
+      if (updateTaskError) throw updateTaskError;
 
       await supabase.from('workflow_history').insert({
         report_id: report.id,
-        action: 'Revisi Staff Disetujui',
+        action: 'Revisi Disetujui (Menunggu Review Akhir)',
         user_id: currentUser?.id,
-        status: 'completed',
-        notes: `Koordinator menyetujui ${tasksToApprove.length} revisi tugas.`,
+        status: 'pending-review',
+        notes: `Koordinator menyetujui revisi. Laporan masuk ke tahap review akhir sebelum ke TU.`,
       });
 
-      toast.success("Revisi staff berhasil disetujui!");
+      toast.success("Revisi disetujui! Laporan masuk ke tahap Review Akhir.");
       setReviewRevisionReport(null);
       fetchData();
 
@@ -477,25 +479,21 @@ export function CoordinatorDashboard() {
   };
 
   const handleApproveTask = async (report: LocalReport) => {
-    // Logic ini mirip dengan handleQuickForwardToTU
-    // Setujui tugas staff (sudah completed), lalu forward ke TU
     if (!report || !currentUser) return;
 
     try {
-      // 1. Update status report jadi pending-approval-tu
       const { error: updateError } = await supabase
         .from('reports')
         .update({ status: 'pending-approval-tu', current_holder: null })
         .eq('id', report.id);
       if (updateError) throw updateError;
 
-      // 2. Catat history
       await supabase.from('workflow_history').insert({
         report_id: report.id,
         action: 'Pekerjaan Staff Disetujui & Diteruskan ke TU',
         user_id: currentUser?.id,
         status: 'pending-approval-tu',
-        notes: `Koordinator menyetujui hasil kerja staff dan meneruskan ke TU.`,
+        notes: `Koordinator menyetujui hasil kerja staff (termasuk revisi jika ada) dan meneruskan ke TU.`,
       });
 
       toast.success("Laporan berhasil disetujui dan diteruskan ke TU!");
@@ -533,18 +531,23 @@ export function CoordinatorDashboard() {
   }
 
   const getStatusInfo = (report: LocalReport) => {
-    if (report.task_assignments && report.task_assignments.some(a => a.status === 'revision-required')) {
+    if (report.task_assignments?.some(a => a.status === 'revision-required')) {
       return { text: 'Perlu Revisi', value: 'revision-required', color: 'text-red-600', icon: XCircle };
     }
-    if (report.task_assignments && report.task_assignments.some(a => a.status === 'pending-review')) {
-      return { text: 'Menunggu Review (Revisi)', value: 'pending-review-revisi', color: 'text-cyan-600', icon: Eye };
+    if (report.task_assignments?.some(a => a.status === 'completed' && a.revised_file_path)) {
+      return { text: 'Revisi Masuk (Perlu Review)', value: 'pending-review-revisi', color: 'text-cyan-600', icon: Eye };
     }
-    if (report.task_assignments && report.task_assignments.length > 0 && report.task_assignments.every(a => a.status === 'completed')) {
-      return { text: 'Menunggu Review (Baru)', value: 'pending-review-baru', color: 'text-orange-600', icon: Eye };
+    const allTasksDone = report.task_assignments?.length > 0 &&
+      report.task_assignments.every(a => a.status === 'completed' || a.status === 'pending-review');
+
+    if (allTasksDone) {
+      return { text: 'Tugas Selesai (Review Akhir)', value: 'pending-review-baru', color: 'text-orange-600', icon: CheckCircle };
     }
+
     if (report.status === 'completed') return { text: 'Selesai', value: 'completed', color: 'text-green-600', icon: CheckCircle };
     if (report.status === 'forwarded-to-coordinator') return { text: 'Perlu Tindakan', value: 'forwarded-to-coordinator', color: 'text-purple-600', icon: Send };
     if (report.status === 'in-progress') return { text: 'Dikerjakan Staff', value: 'in-progress', color: 'text-blue-600', icon: Clock };
+
     return { text: report.status, value: report.status, color: 'text-gray-600', icon: AlertTriangle };
   };
 
@@ -559,8 +562,23 @@ export function CoordinatorDashboard() {
     return Math.round((completedCount / report.task_assignments.length) * 100);
   };
 
+  // --- LOGIC FILTER DROPDOWN DINAMIS ---
+  // 1. Tentukan Spesialisasi berdasarkan nama user
+  const currentCoordinatorName = currentUser?.full_name || currentUser?.name || "";
+  const specializedCategory = COORDINATOR_SPECIALIZATION[currentCoordinatorName];
+
+  // 2. Tentukan Opsi Dropdown (Jika spesialisasi ada, ambil sub-layanan. Jika tidak, ambil Main Services)
+  const serviceOptions = specializedCategory
+    ? SUB_SERVICES_MAP[specializedCategory] || []
+    : SERVICES;
+
+  // 3. Filter Reports
   const filteredReports = localReports.filter(report => {
-    const matchesService = !serviceFilter || report.layanan === serviceFilter;
+    // Logic: Jika user memilih opsi filter, cocokkan dengan sub_layanan ATAU layanan utama
+    const matchesService = !serviceFilter ||
+      report.sub_layanan === serviceFilter ||
+      report.layanan === serviceFilter;
+
     const matchesSearch =
       !searchQuery ||
       report.hal?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -590,35 +608,40 @@ export function CoordinatorDashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <p>Memuat data koordinator...</p>
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="flex flex-col items-center gap-3">
+          <Clock className="w-8 h-8 text-blue-600 animate-spin" />
+          <p className="text-gray-500 font-medium">Memuat data koordinator...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+    <div className="min-h-screen bg-gray-50 font-sans">
+      <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-40 shadow-sm">
         {/* --- Header --- */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900">Dashboard Koordinator</h1>
-            <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">
-              <Calendar className="w-4 h-4" />
+            <h1 className="text-xl font-bold text-gray-900 tracking-tight">Dashboard Koordinator</h1>
+            <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
+              <Calendar className="w-3.5 h-3.5" />
               <span>{date}</span>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+            <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium">
               <LogOut className="w-4 h-4" />
               Keluar
             </button>
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <div className="text-sm font-medium text-gray-900">{currentUser.name || currentUser.full_name || "Koordinator"}</div>
-                <div className="text-xs text-blue-600">Online</div>
+            <div className="flex items-center gap-3 border-l pl-4">
+              <div className="text-right hidden sm:block">
+                <div className="text-sm font-semibold text-gray-900">{currentUser.name || currentUser.full_name || "Koordinator"}</div>
+                <div className="text-xs text-green-600 font-medium flex items-center justify-end gap-1">
+                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div> Online
+                </div>
               </div>
-              <div className="w-10 h-10 bg-gray-900 rounded-full flex items-center justify-center text-white font-medium">
+              <div className="w-9 h-9 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
                 {(currentUser.name || currentUser.full_name)?.charAt(0).toUpperCase() || "K"}
               </div>
             </div>
@@ -626,49 +649,60 @@ export function CoordinatorDashboard() {
         </div>
       </div>
 
-      <div className="p-4 sm:p-6">
-        <div className="mb-6 sm:mb-8">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">Tugas dan Laporan Masuk</h2>
-          <p className="text-sm sm:text-base text-gray-600">Monitor dan kelola laporan yang ditugaskan kepada Anda</p>
-        </div>
+      <div className="p-4 sm:p-6 max-w-7xl mx-auto">
 
-        {/* --- Statistik --- */}
+        {/* --- Statistik Cards --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6 flex items-center gap-4">
-            <div className="p-3 bg-blue-100 rounded-full text-blue-600"><FileText className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.totalLaporan}</div><div className="text-sm text-gray-500">Total Laporan</div></div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
+            <div className="p-3 bg-blue-50 rounded-lg text-blue-600"><FileText className="w-6 h-6" /></div>
+            <div><div className="text-2xl font-bold text-gray-900">{stats.totalLaporan}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Total Laporan</div></div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6 flex items-center gap-4">
-            <div className="p-3 bg-yellow-100 rounded-full text-yellow-600"><AlertTriangle className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.perluTindakan}</div><div className="text-sm text-gray-500">Perlu Tindakan</div></div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
+            <div className="p-3 bg-purple-50 rounded-lg text-purple-600"><AlertTriangle className="w-6 h-6" /></div>
+            <div><div className="text-2xl font-bold text-gray-900">{stats.perluTindakan}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Perlu Tindakan</div></div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6 flex items-center gap-4">
-            <div className="p-3 bg-cyan-100 rounded-full text-cyan-600"><Eye className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.menungguReview}</div><div className="text-sm text-gray-500">Menunggu Review</div></div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
+            <div className="p-3 bg-cyan-50 rounded-lg text-cyan-600"><Eye className="w-6 h-6" /></div>
+            <div><div className="text-2xl font-bold text-gray-900">{stats.menungguReview}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Menunggu Review</div></div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6 flex items-center gap-4">
-            <div className="p-3 bg-red-100 rounded-full text-red-600"><XCircle className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.revisi}</div><div className="text-sm text-gray-500">Revisi</div></div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
+            <div className="p-3 bg-red-50 rounded-lg text-red-600"><XCircle className="w-6 h-6" /></div>
+            <div><div className="text-2xl font-bold text-gray-900">{stats.revisi}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Sedang Revisi</div></div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-6 flex items-center gap-4">
-            <div className="p-3 bg-green-100 rounded-full text-green-600"><CheckCircle className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.selesai}</div><div className="text-sm text-gray-500">Selesai</div></div>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
+            <div className="p-3 bg-green-50 rounded-lg text-green-600"><CheckCircle className="w-6 h-6" /></div>
+            <div><div className="text-2xl font-bold text-gray-900">{stats.selesai}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Selesai</div></div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm border">
-          {/* --- Filter --- */}
-          <div className="p-4 sm:p-6 border-b border-gray-200">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          {/* --- Filter Bar --- */}
+          <div className="p-5 border-b border-gray-200 bg-gray-50/50">
+            <div className="flex flex-col md:flex-row gap-4 justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-gray-800">Daftar Laporan</h2>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <div className="relative sm:col-span-2 lg:col-span-2">
                 <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <input type="text" placeholder="Cari laporan..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm" />
+                <input type="text" placeholder="Cari perihal atau no. surat..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm transition-shadow" />
               </div>
-              <select value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
-                <option value="">Semua Layanan</option>
-                {SERVICES.map(s => <option key={s} value={s}>{s}</option>)}
+
+              {/* --- DROPDOWN LAYANAN DINAMIS --- */}
+              <select
+                value={serviceFilter}
+                onChange={(e) => setServiceFilter(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-white"
+              >
+                <option value="">
+                  {specializedCategory ? `Semua Layanan ${specializedCategory}` : "Semua Layanan"}
+                </option>
+                {/* Menampilkan Opsi berdasarkan Spesialisasi Koordinator */}
+                {serviceOptions.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
               </select>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-white">
                 <option value="">Semua Status</option>
                 <option value="forwarded-to-coordinator">Perlu Tindakan</option>
                 <option value="revision-required">Perlu Revisi</option>
@@ -685,11 +719,13 @@ export function CoordinatorDashboard() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Laporan</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Dari</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Progress</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Laporan</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Dari</th>
+                  {/* KOLOM BARU: LAYANAN */}
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Layanan</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Progress</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Aksi</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -697,61 +733,70 @@ export function CoordinatorDashboard() {
                   const status = getStatusInfo(report);
                   const progress = getReportProgress(report);
                   return (
-                    <tr key={(report as any).id}>
+                    <tr key={(report as any).id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
-                        <div className="font-medium text-gray-900">{report.hal}</div>
-                        <div className="text-sm text-gray-500">{report.no_surat}</div>
+                        <div className="font-semibold text-gray-900 line-clamp-2">{report.hal}</div>
+                        <div className="text-xs text-gray-500 mt-1 font-mono">{report.no_surat}</div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-500 hidden md:table-cell">{getProfileName((report as any).created_by)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600 hidden md:table-cell">{getProfileName((report as any).created_by)}</td>
+
+                      {/* ISI KOLOM LAYANAN */}
+                      <td className="px-6 py-4 text-sm text-gray-600 hidden md:table-cell">
+                        {report.sub_layanan || report.layanan}
+                      </td>
+
                       <td className="px-6 py-4">
-                        <div className={`inline-flex items-center gap-2 text-sm font-medium ${status.color}`}>
-                          <status.icon className="w-4 h-4" />
+                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${status.color.replace('text-', 'bg-').replace('600', '50')} ${status.color.replace('text-', 'border-').replace('600', '200')} ${status.color}`}>
+                          <status.icon className="w-3.5 h-3.5" />
                           {status.text}
                         </div>
                       </td>
-                      <td className="px-6 py-4 hidden md:table-cell">
+                      <td className="px-6 py-4 hidden md:table-cell align-middle">
                         <div className="flex items-center gap-2">
-                          <div className="w-full bg-gray-200 rounded-full h-1.5"><div className={`h-1.5 rounded-full ${progress === 100 ? 'bg-green-600' : 'bg-blue-600'}`} style={{ width: `${progress}%` }}></div></div>
-                          <span className="text-sm font-medium text-gray-600">{progress}%</span>
+                          <div className="w-24 bg-gray-200 rounded-full h-2"><div className={`h-2 rounded-full ${progress === 100 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${progress}%` }}></div></div>
+                          <span className="text-xs font-semibold text-gray-600">{progress}%</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-sm font-medium">
                         <div className="flex items-center gap-2">
 
+                          {/* TOMBOL KHUSUS: Review Revisi (Cyan) */}
                           {status.value === 'pending-review-revisi' && (
                             <button
                               onClick={() => setReviewRevisionReport(report)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-600 text-white rounded-full hover:bg-blue-700"
-                              title="Review Revisi Staff"
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-cyan-600 text-white rounded-md hover:bg-cyan-700 shadow-sm transition-all"
+                              title="Tinjau hasil revisi dari staff"
                             >
-                              <CheckCircle className="w-4 h-4" /> Review Revisi
+                              <Eye className="w-3.5 h-3.5" /> Tinjau Revisi
                             </button>
                           )}
 
+                          {/* TOMBOL UMUM */}
                           {status.value !== 'pending-review-revisi' && (
                             <>
-                              <button onClick={() => setSelectedReport(report)} className="text-blue-600 hover:text-blue-900" title="Lihat Detail"><Eye className="w-5 h-5" /></button>
-                              <button onClick={() => setAddStaffReport(report)} className="text-gray-600 hover:text-gray-900" title="Tambah Staff"><UserPlus className="w-5 h-5" /></button>
-                              <button onClick={() => setRevisionReport(report)} className="text-red-600 hover:text-red-900" title="Revisi / Kembalikan"><AlertTriangle className="w-5 h-5" /></button>
-
+                              <button onClick={() => setSelectedReport(report)} className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors" title="Lihat Detail"><Eye className="w-5 h-5" /></button>
+                              <button onClick={() => setAddStaffReport(report)} className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors" title="Atur Staff"><UserPlus className="w-5 h-5" /></button>
+                              <button onClick={() => setRevisionReport(report)} className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-md transition-colors" title="Kembalikan / Revisi"><AlertTriangle className="w-5 h-5" /></button>
                             </>
                           )}
 
-                          {progress === 100 && status.value === 'pending-review-baru' && (
+                          {/* TOMBOL REVIEW TUGAS REGULAR/AKHIR (Orange) */}
+                          {status.value === 'pending-review-baru' && (
                             <button
                               onClick={() => setReviewTaskReport(report)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-600 text-white rounded-full hover:bg-orange-700"
-                              title="Review Tugas Staff"
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-500 text-white rounded-md hover:bg-orange-600 shadow-sm transition-all ml-1"
+                              title="Review tugas staff sebelum ke TU"
                             >
-                              <CheckCircle className="w-4 h-4" /> Review Tugas
+                              <CheckCircle className="w-3.5 h-3.5" /> Review Akhir
                             </button>
                           )}
 
-                          {progress === 100 && status.value === 'pending-review-baru' && (
+                          {/* SHORTCUT: Langsung Forward ke TU jika sudah clear */}
+                          {status.value === 'pending-review-baru' && (
                             <button
                               onClick={() => handleQuickForwardToTU(report)}
                               disabled={forwardingId === (report as any).id}
-                              className="text-green-600 hover:text-green-900 disabled:text-gray-300 disabled:cursor-wait"
+                              className="p-1.5 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50"
                               title="Setujui & Teruskan ke TU"
                             >
                               {forwardingId === (report as any).id ? <Clock className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
@@ -763,7 +808,7 @@ export function CoordinatorDashboard() {
                   );
                 })}
                 {filteredReports.length === 0 && (
-                  <tr><td colSpan={5} className="text-center py-10 text-gray-500">Tidak ada laporan yang cocok.</td></tr>
+                  <tr><td colSpan={6} className="text-center py-12 text-gray-500">Tidak ada laporan yang cocok dengan filter Anda.</td></tr>
                 )}
               </tbody>
             </table>

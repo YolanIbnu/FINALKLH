@@ -43,6 +43,9 @@ type TaskAssignment = {
   revised_file_path?: string;
   staff_revision_notes?: string;
   Staff_notes?: string;
+  file_path?: string;
+  progress?: number;
+  completed_at?: string;
 };
 
 // === Komponen Helper: Header Info ===
@@ -209,7 +212,7 @@ export function StaffDashboard() {
         .from("task_assignments")
         .select("*, reports(*)")
         .eq("staff_id", currentUser.id)
-        .in('status', ['in-progress', 'revision-required'])
+        .in('status', ['in-progress', 'revision-required']) // Staff hanya melihat tugas yang belum beres
         .order("created_at", { ascending: false });
 
       if (tasksError) throw tasksError;
@@ -313,12 +316,14 @@ export function StaffDashboard() {
       const cleanName = originalFile.name.replace(/[^a-zA-Z0-9.]/g, '_').toLowerCase();
       const filePath = `public/${Date.now()}_${cleanName}`;
 
+      // Upload file utama
       const { error: uploadError } = await supabase.storage
         .from('documents')
         .upload(filePath, originalFile);
 
       if (uploadError) throw uploadError;
 
+      // Update Task jadi Completed
       const { error } = await supabase
         .from("task_assignments")
         .update({
@@ -335,14 +340,14 @@ export function StaffDashboard() {
 
       toast.success("Pekerjaan berhasil dikirim untuk review!");
       setSelectedTask(null);
-      fetchData();
+      fetchData(); // Task akan hilang dari list karena status 'completed' tidak diambil
     } catch (err: any) {
       console.error(err);
       toast.error("Terjadi kesalahan saat mengirim pekerjaan: " + err.message);
     }
   };
 
-  // --- FUNGSI: Handle Submit Revisi ---
+  // --- FUNGSI: Handle Submit Revisi (DIPERBAIKI) ---
   const handleSubmitRevision = async () => {
     if (!revisionFile) {
       toast.error("Silakan unggah berkas revisi Anda.");
@@ -360,12 +365,27 @@ export function StaffDashboard() {
       const fileName = `${Date.now()}_${cleanName}`;
       const filePath = `public/${fileName}`;
 
+      // 1. Upload File Revisi ke bucket 'revised_documents'
       const { error: uploadError } = await supabase.storage
         .from('revised_documents')
         .upload(filePath, revisionFile);
 
       if (uploadError) throw uploadError;
 
+      // 2. UPDATE DATABASE: Set Status ke 'completed' & simpan path revisi
+      const { error: updateError } = await supabase
+        .from("task_assignments")
+        .update({
+          status: "completed", // Penting! Ubah ke 'completed' agar Coordinator bisa mereview
+          revised_file_path: filePath,
+          staff_revision_notes: staffNotes,
+          completed_at: new Date().toISOString()
+        })
+        .eq("id", selectedTask.id);
+
+      if (updateError) throw updateError;
+
+      // 3. Catat di History
       await supabase
         .from('workflow_history')
         .insert({
@@ -377,9 +397,13 @@ export function StaffDashboard() {
         })
 
       toast.success("Hasil revisi berhasil dikirim!");
+
+      // Reset State
       setSelectedTask(null);
       setRevisionFile(null);
       setStaffNotes("");
+
+      // 4. Refresh Data: Tugas ini akan HILANG dari dashboard staff karena statusnya sekarang 'completed'
       fetchData();
 
     } catch (error: any) {
