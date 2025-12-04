@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { Search, CheckCircle, Circle, Loader2, AlertCircle, User, Calendar, FileClock, MessageSquareText, Edit3 } from "lucide-react";
+import { Search, CheckCircle, Circle, Loader2, AlertCircle, User, Calendar, MessageSquareText, Edit3 } from "lucide-react";
 import { toast } from "@/lib/toast";
 
 // ==================================================================
@@ -52,7 +52,7 @@ const PROCESS_STEPS = [
 // [MODIFIKASI] Menghapus penambahan langkah 'Selesai' secara otomatis
 async function formatApiDataToReport(apiData) {
     const history = apiData.workflow_history || [];
-    
+
     // Fungsi ini tidak ada di file asli, tapi dibutuhkan untuk mengambil nama user dari history
     const fetchUserNames = async (history) => {
         const userIds = [...new Set(history.map(item => item.user_id).filter(Boolean))];
@@ -65,13 +65,13 @@ async function formatApiDataToReport(apiData) {
         }
         return userMap;
     };
-    
+
     const userMap = await fetchUserNames(history);
 
     const formatHistoryToTimeline = (): TimelineStep[] => {
         return history.map((item, index) => {
             const stepDefinition = PROCESS_STEPS.find(p => p.id === item.action) || PROCESS_STEPS[index] || { id: item.action, title: item.action };
-            
+
             return {
                 step: stepDefinition.id,
                 description: item.notes || "Proses telah dilaksanakan.",
@@ -83,7 +83,7 @@ async function formatApiDataToReport(apiData) {
     };
 
     const timeline = formatHistoryToTimeline();
-    
+
     const calculateProgress = () => {
         const isCompleted = apiData.status?.toLowerCase() === 'selesai' || apiData.status?.toLowerCase() === 'completed';
         if (isCompleted) return 100;
@@ -98,7 +98,7 @@ async function formatApiDataToReport(apiData) {
     const lastUpdate = history.length > 0
         ? new Date(history[history.length - 1].created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }).replace(/\./g, '/')
         : new Date(apiData.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }).replace(/\./g, '/');
-    
+
     const coordinatorNotes: CoordinatorNote[] = (apiData.task_assignments || [])
         .map(assignment => ({
             staffName: assignment.profiles?.name || 'Staff tidak diketahui',
@@ -152,7 +152,7 @@ export function PublicTracking() {
             }
 
             const data = await response.json();
-            
+
             const formattedData = await formatApiDataToReport(data);
             setSearchState({ status: 'success', data: formattedData });
 
@@ -167,7 +167,7 @@ export function PublicTracking() {
         <div className="bg-gray-50 p-4 sm:p-8 flex flex-col items-center min-h-screen">
             <div className="w-full max-w-3xl">
                 <div className="text-center mb-8">
-                    <FileClock className="mx-auto h-12 w-12 text-blue-600" />
+                    <img src="/Logo SDMO x1.png" alt="Logo SDMO" className="mx-auto h-24 w-auto" />
                     <h1 className="mt-4 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
                         Lacak Proses Administrasi
                     </h1>
@@ -238,20 +238,20 @@ const TrackingResult = ({ report }: { report: Report }) => {
             <div className="border rounded-lg p-4">
                 <h2 className="text-lg font-semibold text-gray-800 mb-2">Progress Penanganan</h2>
                 <div className="w-full bg-gray-200 rounded-full h-4 relative overflow-hidden">
-                    <div 
-                        className="bg-blue-600 h-4 rounded-full text-center text-white text-xs font-bold transition-all duration-500 flex items-center justify-center" 
+                    <div
+                        className="bg-blue-600 h-4 rounded-full text-center text-white text-xs font-bold transition-all duration-500 flex items-center justify-center"
                         style={{ width: `${report.progress}%` }}>
-                       <span className="absolute left-0 right-0">{report.progress}%</span>
+                        <span className="absolute left-0 right-0">{report.progress}%</span>
                     </div>
                 </div>
             </div>
-            
+
             <div className="border rounded-lg p-4">
                 <h2 className="text-lg font-semibold text-gray-800 mb-4">Informasi Surat</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                     <p><strong className="font-medium text-gray-500 w-28 inline-block">No. Surat</strong>: <span className="text-gray-900 font-semibold">{report.no_surat}</span></p>
                     <p><strong className="font-medium text-gray-500 w-28 inline-block">Hal</strong>: <span className="text-gray-900">{report.hal}</span></p>
-                    <p><strong className="font-medium text-gray-500 w-28 inline-block">Status</strong>: 
+                    <p><strong className="font-medium text-gray-500 w-28 inline-block">Status</strong>:
                         <span className={`font-bold px-2 py-1 rounded-full text-xs ${report.status.toLowerCase() === 'selesai' || report.status.toLowerCase() === 'completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                             {report.status}
                         </span>
@@ -266,7 +266,7 @@ const TrackingResult = ({ report }: { report: Report }) => {
                     {PROCESS_STEPS.map((step, index) => {
                         const isCompleted = timelineMap.has(step.id);
                         const stepData = timelineMap.get(step.id);
-                        
+
                         return (
                             <div key={index} className="relative pl-8">
                                 <div className="absolute -left-[13px] top-1 bg-white p-1 rounded-full">
@@ -279,14 +279,14 @@ const TrackingResult = ({ report }: { report: Report }) => {
                                 <div>
                                     <p className={`font-semibold ${isCompleted ? 'text-gray-800' : 'text-gray-400'}`}>{step.title}</p>
                                     <p className={`text-sm ${isCompleted ? 'text-gray-600' : 'text-gray-400'}`}>{step.description}</p>
-                                    
+
                                     {isCompleted && stepData && (
                                         <>
                                             <div className="flex items-center gap-4 text-xs text-gray-500 mt-2">
                                                 <div className="flex items-center gap-1.5"><Calendar className="w-3 h-3" /><span>{stepData.date}</span></div>
                                                 <div className="flex items-center gap-1.5"><User className="w-3 h-3" /><span>{stepData.location}</span></div>
                                             </div>
-                                            
+
                                             {step.id === 'Penugasan Staff' && (mainNotes.length > 0 || revisionNotes.length > 0) && (
                                                 <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900 space-y-3">
                                                     {mainNotes.length > 0 && (
