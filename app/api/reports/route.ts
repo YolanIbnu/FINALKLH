@@ -2,130 +2,66 @@ import { createServerClient } from "@/lib/supabase/server"
 import { cookies } from "next/headers"
 import { type NextRequest, NextResponse } from "next/server"
 
+// --- HANDLE CREATE (POST) ---
 export async function POST(request: NextRequest) {
   try {
-    console.log("[v0] === REPORT CREATION DEBUG START ===")
-    console.log("[v0] Environment check:")
-    console.log("[v0] - NODE_ENV:", process.env.NODE_ENV)
-    console.log("[v0] - Request URL:", request.url)
-    console.log("[v0] - Request headers:", Object.fromEntries(request.headers.entries()))
-
     const reportData = await request.json()
-    console.log("[v0] Report data received:", reportData)
     const { originalFiles, ...reportFields } = reportData
 
     const cookieStore = await cookies()
-    console.log("[v0] Cookie store created")
-
     const supabase = createServerClient(cookieStore)
-    console.log("[v0] Supabase client created")
 
-    console.log("[v0] Attempting to get authenticated user...")
+    // 1. Cek User & Auth
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser()
 
-    console.log("[v0] Auth result:")
-    console.log("[v0] - User:", user ? { id: user.id, email: user.email } : null)
-    console.log("[v0] - Auth error:", authError)
-
     if (authError || !user) {
-      console.error("[v0] Authentication failed - returning 401")
       return NextResponse.json(
-        {
-          error: "Unauthorized",
-          details: authError?.message || "No user found",
-          debug: "Authentication failed in local environment",
-        },
+        { error: "Unauthorized", details: authError?.message || "No user found" },
         { status: 401 },
       )
     }
 
-    console.log("[v0] Authenticated user ID:", user.id)
-
-    console.log("[v0] Fetching user profile...")
-    let { data: profile, error: profileError } = await supabase
+    // 2. Cek Profile & Role
+    let { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .single()
 
-    console.log("[v0] Profile query result:")
-    console.log("[v0] - Profile:", profile)
-    console.log("[v0] - Profile error:", profileError)
-
-    if (profileError || !profile) {
-      console.log("[v0] Profile not found, creating new profile for user:", user.id)
-
-      // Try to create missing profile
-      const { data: newProfile, error: createError } = await supabase
+    if (!profile) {
+      // Buat profile baru jika belum ada (Fallback)
+      const { data: newProfile } = await supabase
         .from("profiles")
-        .insert({
-          id: user.id,
-          name: user.email?.split("@")[0] || "User",
-          role: "Staff", // Default role
-        })
+        .insert({ id: user.id, name: user.email?.split("@")[0] || "User", role: "Staff" })
         .select("role")
         .single()
-
-      console.log("[v0] Profile creation result:")
-      console.log("[v0] - New profile:", newProfile)
-      console.log("[v0] - Creation error:", createError)
-
-      if (createError) {
-        console.error("[v0] Error creating profile:", createError)
-        return NextResponse.json(
-          {
-            error: "User profile could not be created",
-            details: createError.message,
-            debug: "Profile creation failed",
-          },
-          { status: 403 },
-        )
-      }
-
       profile = newProfile
-      console.log("[v0] Created new profile with role:", profile.role)
     }
 
-    console.log("[v0] User profile found with role:", profile.role)
-
     const allowedRoles = ["TU", "Admin", "Coordinator", "Koordinator"]
-    console.log("[v0] Checking role authorization...")
-    console.log("[v0] - User role:", profile.role)
-    console.log("[v0] - Allowed roles:", allowedRoles)
-    console.log("[v0] - Role allowed:", allowedRoles.includes(profile.role))
-
-    if (!allowedRoles.includes(profile.role)) {
-      console.error("[v0] Role authorization failed")
+    if (!profile || !allowedRoles.includes(profile.role)) {
       return NextResponse.json(
-        {
-          error: "Only TU, Admin, and Coordinator can create reports",
-          details: `Current role: ${profile.role}`,
-          debug: "Role authorization failed",
-        },
+        { error: "Only TU, Admin, and Coordinator can create reports" },
         { status: 403 },
       )
     }
 
-    // Generate tracking number
-    const trackingNumber = `TRK-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+    // 3. Setup Default Values
+    const status = ["draft", "in-progress", "completed", "revision-required", "forwarded-to-tu"].includes(reportFields.status) ? reportFields.status : "draft"
+    const priority = ["rendah", "sedang", "tinggi"].includes(reportFields.priority) ? reportFields.priority : "sedang"
 
-    const validStatuses = ["draft", "in-progress", "completed", "revision-required", "forwarded-to-tu"]
-    const status = validStatuses.includes(reportFields.status) ? reportFields.status : "draft"
-
-    const validPriorities = ["rendah", "sedang", "tinggi"]
-    const priority = validPriorities.includes(reportFields.priority) ? reportFields.priority : "sedang"
-
-    console.log("[v0] Attempting to create report with user ID:", user.id)
-
+    // 4. INSERT KE DATABASE
     const { data: report, error: reportError } = await supabase
       .from("reports")
       .insert({
+        // Mapping Data dari Frontend ke Database
         no_surat: reportFields.noSurat,
         hal: reportFields.hal,
         layanan: reportFields.layanan,
+        sub_layanan: reportFields.subLayanan || reportFields.sub_layanan,
         dari: reportFields.dari,
         tanggal_surat: reportFields.tanggalSurat,
         tanggal_agenda: reportFields.tanggalAgenda,
@@ -133,6 +69,11 @@ export async function POST(request: NextRequest) {
         no_agenda: reportFields.noAgenda,
         kelompok_asal_surat: reportFields.kelompokAsalSurat,
         agenda_sestama: reportFields.agendaSestama,
+
+        // SEKARANG SUDAH AKTIF (Karena kolom sudah Anda tambahkan)
+        sifat: reportFields.sifat,
+        derajat: reportFields.derajat,
+
         status: status,
         priority: priority,
         created_by: user.id,
@@ -141,26 +82,12 @@ export async function POST(request: NextRequest) {
       .select()
       .single()
 
-    console.log("[v0] Report creation result:")
-    console.log("[v0] - Report:", report)
-    console.log("[v0] - Report error:", reportError)
-
     if (reportError) {
-      console.error("[v0] Error creating report:", reportError)
-      return NextResponse.json(
-        {
-          error: "Failed to create report",
-          details: reportError.message,
-          debug: "Database insert failed",
-        },
-        { status: 500 },
-      )
+      console.error("Error creating report:", reportError)
+      return NextResponse.json({ error: "Failed to create report", details: reportError.message }, { status: 500 })
     }
 
-    console.log("[v0] Report created successfully:", report.id)
-    console.log("[v0] === REPORT CREATION DEBUG END ===")
-
-    // Insert file attachments if any
+    // 5. Insert File Attachments (Jika ada)
     if (originalFiles && originalFiles.length > 0) {
       const fileAttachments = originalFiles.map((file: any) => ({
         report_id: report.id,
@@ -168,30 +95,21 @@ export async function POST(request: NextRequest) {
         file_url: file.fileUrl,
         file_type: "original",
         file_size: file.size || null,
-        uploaded_by: user.id, // Use real authenticated user UUID
+        uploaded_by: user.id,
       }))
-
-      const { error: filesError } = await supabase.from("file_attachments").insert(fileAttachments)
-
-      if (filesError) {
-        console.error("Error saving file attachments:", filesError)
-        return NextResponse.json({ error: "Failed to save file attachments" }, { status: 500 })
-      }
+      await supabase.from("file_attachments").insert(fileAttachments)
     }
 
-    // Create workflow history entry
-    const { error: workflowError } = await supabase.from("workflow_history").insert({
+    // 6. Catat di Workflow History
+    await supabase.from("workflow_history").insert({
       report_id: report.id,
       action: "Laporan dibuat",
-      user_id: user.id, // Use real authenticated user UUID
+      user_id: user.id,
       status: status,
       notes: `Laporan baru dibuat oleh ${profile.role}`,
     })
 
-    if (workflowError) {
-      console.error("Error creating workflow history:", workflowError)
-    }
-
+    // 7. Ambil Tracking Number
     const { data: tracking } = await supabase
       .from("letter_tracking")
       .select("tracking_number")
@@ -206,18 +124,123 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error("[v0] Error in report creation:", error)
+    console.error("Error in report creation:", error)
     return NextResponse.json(
-      {
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : "Unknown error",
-        debug: "Unexpected error occurred",
-      },
+      { error: "Internal server error", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     )
   }
 }
 
+// --- GANTI SELURUH FUNGSI "PUT" DI route.ts DENGAN INI ---
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { id, action, notes, currentUser, originalFiles, ...reportData } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "ID Laporan diperlukan untuk update" }, { status: 400 });
+    }
+
+    const cookieStore = await cookies();
+    const supabase = createServerClient(cookieStore);
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // 1. Update Data Laporan Utama
+    const updatePayload: any = {
+      updated_at: new Date().toISOString(),
+      no_surat: reportData.noSurat,
+      hal: reportData.hal,
+      layanan: reportData.layanan,
+      sub_layanan: reportData.sub_layanan || reportData.subLayanan,
+      dari: reportData.dari,
+      tanggal_surat: reportData.tanggalSurat,
+      tanggal_agenda: reportData.tanggalAgenda,
+      link_documents: reportData.linkDocuments,
+      no_agenda: reportData.noAgenda,
+      kelompok_asal_surat: reportData.kelompokAsalSurat,
+      agenda_sestama: reportData.agendaSestama,
+      sifat: reportData.sifat,
+      derajat: reportData.derajat,
+      // Update status hanya jika dikirim (misal saat forward)
+      ...(reportData.status && { status: reportData.status }),
+    };
+
+    // Bersihkan field undefined
+    Object.keys(updatePayload).forEach(key =>
+      updatePayload[key] === undefined && delete updatePayload[key]
+    );
+
+    const { data, error } = await supabase
+      .from("reports")
+      .update(updatePayload)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Supabase update error:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // 2. LOGIKA BARU: Sinkronisasi File Lampiran (Fix Foto A/B)
+    // Jika frontend mengirim field 'originalFiles' (walaupun array kosong), 
+    // berarti kita harus menyamakan isi database dengan isi form.
+    if (originalFiles) {
+      // A. Hapus semua file lama yang terhubung dengan report ini
+      // (Ini cara paling aman agar tidak ada duplikat atau file yang harusnya dihapus tapi ketinggalan)
+      await supabase.from("file_attachments").delete().eq("report_id", id);
+
+      // B. Insert ulang file-file yang ada di form saat ini (Foto A baru, dsb)
+      if (originalFiles.length > 0) {
+        const filesToInsert = originalFiles.map((file: any) => ({
+          report_id: id,
+          file_name: file.fileName,
+          file_url: file.fileUrl,
+          file_type: "original",
+          file_size: file.size || null,
+          // Kita set uploader ke user yang sedang mengedit agar UUID valid
+          uploaded_by: user.id,
+          created_at: new Date().toISOString()
+        }));
+
+        const { error: fileError } = await supabase
+          .from("file_attachments")
+          .insert(filesToInsert);
+
+        if (fileError) {
+          console.error("Gagal update file attachments:", fileError);
+        }
+      }
+    }
+
+    // 3. Insert Workflow History (Jika ada action/forward)
+    if (action) {
+      await supabase.from("workflow_history").insert({
+        report_id: id,
+        action: action,
+        user_id: user.id,
+        status: updatePayload.status || data.status,
+        notes: notes || ""
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      report: data,
+      message: "Berhasil update laporan"
+    });
+
+  } catch (error: any) {
+    console.error("Server error during PUT:", error);
+    return NextResponse.json({ error: error.message || "Internal Server Error" }, { status: 500 });
+  }
+}
+// --- HANDLE GET (READ) ---
 export async function GET(request: NextRequest) {
   try {
     const cookieStore = await cookies()

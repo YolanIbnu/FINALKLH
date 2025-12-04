@@ -1,6 +1,5 @@
 "use client"
 
-// 1. Tambahkan useEffect di sini
 import { useState, useEffect } from "react"
 import { X, Upload, File, Trash2, User, LogOut } from "lucide-react"
 import { SERVICES, SUB_SERVICES_MAP } from "../../types"
@@ -26,66 +25,48 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     return { category: "", subService: "" };
   };
 
-  const initialServiceState = findCategoryForService(report?.layanan);
-
   // State Form
   const [formData, setFormData] = useState({
-    layanan: initialServiceState.category || report?.layanan || "",
-    subLayanan: report?.sub_layanan || report?.subLayanan || initialServiceState.subService || "",
-    linkDocuments: report?.link_documents || report?.linkDocuments || "",
-
-    // Inisialisasi awal (fallback jika data report sudah ada saat mount)
-    noAgenda: report?.no_agenda || report?.noAgenda || "",
-    kelompokAsalSurat: report?.kelompok_asal_surat || report?.kelompokAsalSurat || "",
-    agendaSestama: report?.agenda_sestama || report?.agendaSestama || "",
-    noSurat: report?.no_surat || report?.noSurat || "",
-
-    hal: report?.hal || "",
-    dari: report?.dari || "",
-    tanggalAgenda: report?.tanggal_agenda || report?.tanggalAgenda || "",
-    tanggalSurat: report?.tanggal_surat || report?.tanggalSurat || "",
-    sifat: report?.sifat || [],
-    derajat: report?.derajat || [],
-    status: report?.status || "Dalam Proses",
+    layanan: "",
+    subLayanan: "",
+    linkDocuments: "",
+    noAgenda: "",
+    kelompokAsalSurat: "",
+    agendaSestama: "",
+    noSurat: "",
+    hal: "",
+    dari: "",
+    tanggalAgenda: "",
+    tanggalSurat: "",
+    sifat: [],
+    derajat: [],
+    status: "Dalam Proses",
   })
 
   // State Attachments
-  const [attachments, setAttachments] = useState<FileAttachment[]>(
-    report?.originalFiles ||
-    (report?.file_attachments?.map((f: any) => ({
-      id: f.id,
-      fileName: f.file_name,
-      fileUrl: f.file_url,
-      uploadedAt: f.created_at,
-      uploadedBy: f.uploaded_by,
-      type: f.file_type
-    })) || [])
-  )
+  const [attachments, setAttachments] = useState<FileAttachment[]>([])
 
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({})
 
-  // ---------------------------------------------------------
-  // 2. BAGIAN PENTING: USE EFFECT UNTUK SINKRONISASI DATA EDIT
-  // ---------------------------------------------------------
+  // Initialize data on mount or when report changes
   useEffect(() => {
     if (report) {
-      // Logic untuk layanan
       const serviceState = findCategoryForService(report.layanan);
 
-      // Update Form Data saat tombol Edit diklik
-      setFormData({
-        layanan: serviceState.category || report.layanan || "",
-        subLayanan: report.sub_layanan || report.subLayanan || serviceState.subService || "",
-        linkDocuments: report.link_documents || report.linkDocuments || "",
+      // Jika report sudah memiliki sub_layanan (dari database), pakai itu.
+      // Jika tidak, coba cari dari mapping.
+      const existingSubLayanan = report.sub_layanan || report.subLayanan || serviceState.subService || "";
+      const existingLayanan = serviceState.category || report.layanan || "";
 
-        // MAPPING KOLOM DATABASE (snake_case) KE STATE (camelCase)
-        // Di sini kuncinya agar data muncul kembali!
+      setFormData({
+        layanan: existingLayanan,
+        subLayanan: existingSubLayanan,
+        linkDocuments: report.link_documents || report.linkDocuments || "",
         noAgenda: report.no_agenda || report.noAgenda || "",
         kelompokAsalSurat: report.kelompok_asal_surat || report.kelompokAsalSurat || "",
         agendaSestama: report.agenda_sestama || report.agendaSestama || "",
         noSurat: report.no_surat || report.noSurat || "",
-
         hal: report.hal || "",
         dari: report.dari || "",
         tanggalAgenda: report.tanggal_agenda || report.tanggalAgenda || "",
@@ -95,12 +76,11 @@ export function ReportForm({ report, onSubmit, onCancel }) {
         status: report.status || "Dalam Proses",
       });
 
-      // Update File Attachments dari Database
       if (report.file_attachments && Array.isArray(report.file_attachments)) {
         const mappedFiles = report.file_attachments.map((f: any) => ({
           id: f.id,
-          fileName: f.file_name,   // pastikan nama kolom DB benar
-          fileUrl: f.file_url,     // pastikan nama kolom DB benar
+          fileName: f.file_name,
+          fileUrl: f.file_url,
           uploadedAt: f.created_at,
           uploadedBy: f.uploaded_by,
           type: f.file_type
@@ -110,11 +90,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
         setAttachments(report.originalFiles);
       }
     }
-  }, [report]); // Kode ini berjalan setiap kali prop 'report' berubah
-
-  // ---------------------------------------------------------
-  // AKHIR BAGIAN PERBAIKAN
-  // ---------------------------------------------------------
+  }, [report]);
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -128,44 +104,65 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     }
 
     try {
-      let serviceToSave = ""
-      if (formData.subLayanan && formData.subLayanan !== "") {
-        serviceToSave = formData.subLayanan
-      } else {
-        serviceToSave = formData.layanan
-      }
+      // 1. Tentukan Mode (Edit vs Create)
+      const isEditing = !!report;
+      const method = isEditing ? "PUT" : "POST";
 
-      const { layanan, subLayanan, ...restOfFormData } = formData
+      const payload = {
+        ...formData,
+        // Sertakan ID jika edit
+        id: isEditing ? report.id : undefined,
+
+        // Data layanan
+        layanan: formData.layanan,
+        sub_layanan: formData.subLayanan,
+
+        // Data pendukung
+        originalFiles: attachments,
+        currentUser: currentUser,
+      };
 
       const response = await fetch("/api/reports", {
-        method: "POST",
+        method: method,
         headers: {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify({
-          ...restOfFormData,
-          layanan: serviceToSave,
-          originalFiles: attachments,
-          currentUser: currentUser,
-        }),
+        body: JSON.stringify(payload),
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to save report")
+      // --- PERBAIKAN: SAFE PARSING UNTUK MENCEGAH JSON ERROR ---
+      const text = await response.text();
+      let result = {};
+
+      try {
+        if (text) {
+          result = JSON.parse(text);
+        }
+      } catch (err) {
+        console.error("Gagal parsing respon server:", text);
+        throw new Error("Terjadi kesalahan pada respon server (Invalid JSON)");
       }
 
-      const result = await response.json()
-      trackingToasts.reportCreated(result.report.trackingNumber)
+      if (!response.ok) {
+        throw new Error((result as any).error || `Gagal menyimpan: ${response.status} ${response.statusText}`)
+      }
+      // ---------------------------------------------------------
+
+      if (isEditing) {
+        toast.success("✅ Berhasil", "Laporan berhasil diperbarui")
+      } else {
+        trackingToasts.reportCreated((result as any).report?.trackingNumber || "N/A")
+      }
 
       onSubmit({
         ...formData,
+        sub_layanan: formData.subLayanan,
         originalFiles: attachments,
-        id: result.report.id,
-        trackingNumber: result.report.trackingNumber,
+        id: (result as any).report?.id || report?.id,
+        trackingNumber: (result as any).report?.trackingNumber || report?.trackingNumber,
       })
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving report:", error)
       toast.error("❌ Gagal Menyimpan Laporan", error.message)
     }
