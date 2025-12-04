@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     console.log("[v0] Report data received:", reportData)
     const { originalFiles, ...reportFields } = reportData
 
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     console.log("[v0] Cookie store created")
 
     const supabase = createServerClient(cookieStore)
@@ -129,11 +129,14 @@ export async function POST(request: NextRequest) {
         dari: reportFields.dari,
         tanggal_surat: reportFields.tanggalSurat,
         tanggal_agenda: reportFields.tanggalAgenda,
-        link_documents: reportFields.linkDocuments, // Tambahkan link dokumen
+        link_documents: reportFields.linkDocuments,
+        no_agenda: reportFields.noAgenda,
+        kelompok_asal_surat: reportFields.kelompokAsalSurat,
+        agenda_sestama: reportFields.agendaSestama,
         status: status,
         priority: priority,
-        created_by: user.id, // Use real authenticated user UUID
-        current_holder: user.id, // Use real authenticated user UUID
+        created_by: user.id,
+        current_holder: user.id,
       })
       .select()
       .single()
@@ -217,7 +220,7 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const supabase = createServerClient(cookieStore)
 
     const { data: reports, error: reportsError } = await supabase

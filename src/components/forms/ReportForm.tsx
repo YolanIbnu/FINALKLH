@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+// 1. Tambahkan useEffect di sini
+import { useState, useEffect } from "react"
 import { X, Upload, File, Trash2, User, LogOut } from "lucide-react"
-// Mengimpor SERVICES dan SUB_SERVICES_MAP dari types
 import { SERVICES, SUB_SERVICES_MAP } from "../../types"
 import type { FileAttachment } from "../../types"
 import { useApp } from "../../context/AppContext"
@@ -17,28 +17,104 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     window.location.reload()
   }
 
-  // State di sisi klien (UI)
+  const findCategoryForService = (serviceName: string) => {
+    if (!serviceName) return { category: "", subService: "" };
+    if (SERVICES.includes(serviceName)) return { category: serviceName, subService: "" };
+    for (const [category, subServices] of Object.entries(SUB_SERVICES_MAP)) {
+      if (subServices.includes(serviceName)) return { category, subService: serviceName };
+    }
+    return { category: "", subService: "" };
+  };
+
+  const initialServiceState = findCategoryForService(report?.layanan);
+
+  // State Form
   const [formData, setFormData] = useState({
-    layanan: report?.layanan || "",
-    subLayanan: report?.subLayanan || "",
-    linkDocuments: report?.link_documents || "", // Tambahkan state untuk link dokumen
-    noAgenda: report?.noAgenda || "",
-    kelompokAsalSurat: report?.kelompokAsalSurat || "",
-    agendaSestama: report?.agendaSestama || "",
-    noSurat: report?.noSurat || "",
+    layanan: initialServiceState.category || report?.layanan || "",
+    subLayanan: report?.sub_layanan || report?.subLayanan || initialServiceState.subService || "",
+    linkDocuments: report?.link_documents || report?.linkDocuments || "",
+
+    // Inisialisasi awal (fallback jika data report sudah ada saat mount)
+    noAgenda: report?.no_agenda || report?.noAgenda || "",
+    kelompokAsalSurat: report?.kelompok_asal_surat || report?.kelompokAsalSurat || "",
+    agendaSestama: report?.agenda_sestama || report?.agendaSestama || "",
+    noSurat: report?.no_surat || report?.noSurat || "",
+
     hal: report?.hal || "",
     dari: report?.dari || "",
-    tanggalAgenda: report?.tanggalAgenda || "",
-    tanggalSurat: report?.tanggalSurat || "",
+    tanggalAgenda: report?.tanggal_agenda || report?.tanggalAgenda || "",
+    tanggalSurat: report?.tanggal_surat || report?.tanggalSurat || "",
     sifat: report?.sifat || [],
     derajat: report?.derajat || [],
     status: report?.status || "Dalam Proses",
   })
 
-  // State untuk file attachments tetap ada
-  const [attachments, setAttachments] = useState<FileAttachment[]>(report?.originalFiles || [])
+  // State Attachments
+  const [attachments, setAttachments] = useState<FileAttachment[]>(
+    report?.originalFiles ||
+    (report?.file_attachments?.map((f: any) => ({
+      id: f.id,
+      fileName: f.file_name,
+      fileUrl: f.file_url,
+      uploadedAt: f.created_at,
+      uploadedBy: f.uploaded_by,
+      type: f.file_type
+    })) || [])
+  )
+
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({})
+
+  // ---------------------------------------------------------
+  // 2. BAGIAN PENTING: USE EFFECT UNTUK SINKRONISASI DATA EDIT
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (report) {
+      // Logic untuk layanan
+      const serviceState = findCategoryForService(report.layanan);
+
+      // Update Form Data saat tombol Edit diklik
+      setFormData({
+        layanan: serviceState.category || report.layanan || "",
+        subLayanan: report.sub_layanan || report.subLayanan || serviceState.subService || "",
+        linkDocuments: report.link_documents || report.linkDocuments || "",
+
+        // MAPPING KOLOM DATABASE (snake_case) KE STATE (camelCase)
+        // Di sini kuncinya agar data muncul kembali!
+        noAgenda: report.no_agenda || report.noAgenda || "",
+        kelompokAsalSurat: report.kelompok_asal_surat || report.kelompokAsalSurat || "",
+        agendaSestama: report.agenda_sestama || report.agendaSestama || "",
+        noSurat: report.no_surat || report.noSurat || "",
+
+        hal: report.hal || "",
+        dari: report.dari || "",
+        tanggalAgenda: report.tanggal_agenda || report.tanggalAgenda || "",
+        tanggalSurat: report.tanggal_surat || report.tanggalSurat || "",
+        sifat: report.sifat || [],
+        derajat: report.derajat || [],
+        status: report.status || "Dalam Proses",
+      });
+
+      // Update File Attachments dari Database
+      if (report.file_attachments && Array.isArray(report.file_attachments)) {
+        const mappedFiles = report.file_attachments.map((f: any) => ({
+          id: f.id,
+          fileName: f.file_name,   // pastikan nama kolom DB benar
+          fileUrl: f.file_url,     // pastikan nama kolom DB benar
+          uploadedAt: f.created_at,
+          uploadedBy: f.uploaded_by,
+          type: f.file_type
+        }));
+        setAttachments(mappedFiles);
+      } else if (report.originalFiles) {
+        setAttachments(report.originalFiles);
+      }
+    }
+  }, [report]); // Kode ini berjalan setiap kali prop 'report' berubah
+
+  // ---------------------------------------------------------
+  // AKHIR BAGIAN PERBAIKAN
+  // ---------------------------------------------------------
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -52,7 +128,6 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     }
 
     try {
-      // Logika flattening layanan
       let serviceToSave = ""
       if (formData.subLayanan && formData.subLayanan !== "") {
         serviceToSave = formData.subLayanan
@@ -71,7 +146,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
         body: JSON.stringify({
           ...restOfFormData,
           layanan: serviceToSave,
-          originalFiles: attachments, // Tetap mengirim data file yang ada di state
+          originalFiles: attachments,
           currentUser: currentUser,
         }),
       })
@@ -82,7 +157,6 @@ export function ReportForm({ report, onSubmit, onCancel }) {
       }
 
       const result = await response.json()
-
       trackingToasts.reportCreated(result.report.trackingNumber)
 
       onSubmit({
@@ -99,18 +173,10 @@ export function ReportForm({ report, onSubmit, onCancel }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-
     if (name === "layanan") {
-      setFormData({
-        ...formData,
-        layanan: value,
-        subLayanan: "",
-      })
+      setFormData({ ...formData, layanan: value, subLayanan: "" })
     } else {
-      setFormData({
-        ...formData,
-        [name]: value,
-      })
+      setFormData({ ...formData, [name]: value })
     }
   }
 
@@ -122,10 +188,8 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     }))
   }
 
-  // Fungsi Upload File TETAP ADA (Menggunakan FormData, bukan blob client-side)
   const handleFileUpload = async (files: FileList) => {
     if (!files.length) return
-
     setUploading(true)
     const reportId = report?.id || `temp-${Date.now()}`
 
@@ -137,8 +201,6 @@ export function ReportForm({ report, onSubmit, onCancel }) {
         if (file.size > 10 * 1024 * 1024) {
           throw new Error(`File ${file.name} terlalu besar. Maksimal 10MB.`)
         }
-
-        console.log("[v0] Starting file upload:", file.name, "Size:", file.size)
         setUploadProgress((prev) => ({ ...prev, [fileId]: 0 }))
 
         const formData = new FormData()
@@ -152,29 +214,17 @@ export function ReportForm({ report, onSubmit, onCancel }) {
           body: formData,
         })
 
-        if (!response.ok) {
-          let errorMessage = "Upload failed"
-          try {
-            const errorData = await response.json()
-            errorMessage = errorData.error || errorData.message || `Server error: ${response.status}`
-          } catch (parseError) {
-            errorMessage = `HTTP ${response.status}: ${response.statusText}`
-          }
-          throw new Error(errorMessage)
-        }
+        if (!response.ok) throw new Error("Upload failed")
 
         const fileAttachment: FileAttachment = await response.json()
-
         setAttachments((prev) => [...prev, fileAttachment])
         setUploadProgress((prev) => ({ ...prev, [fileId]: 100 }))
-
         trackingToasts.fileUploaded(file.name)
       } catch (error) {
-        console.error("[v0] Error uploading file:", error)
+        console.error("Error uploading file:", error)
         toast.error("📎 Gagal Mengupload File", `${file.name}: ${error.message}`)
       }
     }
-
     setUploading(false)
     setUploadProgress({})
   }
@@ -182,8 +232,6 @@ export function ReportForm({ report, onSubmit, onCancel }) {
   const handleRemoveFile = (fileId: string) => {
     setAttachments((prev) => prev.filter((file) => file.id !== fileId))
   }
-
-  // !!! FUNGSI handleDownloadFile YANG MENGGUNAKAN BLOB TELAH DIHAPUS DARI SINI !!!
 
   const subServices = formData.layanan ? SUB_SERVICES_MAP[formData.layanan] || [] : []
 
@@ -226,9 +274,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="md:col-span-2">
-              <label htmlFor="layanan" className="block text-sm font-medium text-gray-700 mb-2">
-                Layanan
-              </label>
+              <label htmlFor="layanan" className="block text-sm font-medium text-gray-700 mb-2">Layanan</label>
               <select
                 id="layanan"
                 name="layanan"
@@ -239,18 +285,14 @@ export function ReportForm({ report, onSubmit, onCancel }) {
               >
                 <option value="">Pilih Layanan</option>
                 {SERVICES.map((service) => (
-                  <option key={service} value={service}>
-                    {service}
-                  </option>
+                  <option key={service} value={service}>{service}</option>
                 ))}
               </select>
             </div>
 
             {subServices.length > 0 && (
               <div className="md:col-span-2">
-                <label htmlFor="subLayanan" className="block text-sm font-medium text-gray-700 mb-2">
-                  Detail Layanan
-                </label>
+                <label htmlFor="subLayanan" className="block text-sm font-medium text-gray-700 mb-2">Detail Layanan</label>
                 <select
                   id="subLayanan"
                   name="subLayanan"
@@ -261,18 +303,14 @@ export function ReportForm({ report, onSubmit, onCancel }) {
                 >
                   <option value="">Pilih Detail Layanan</option>
                   {subServices.map((subService) => (
-                    <option key={subService} value={subService}>
-                      {subService}
-                    </option>
+                    <option key={subService} value={subService}>{subService}</option>
                   ))}
                 </select>
               </div>
             )}
 
             <div className="md:col-span-2">
-              <label htmlFor="linkDocuments" className="block text-sm font-medium text-gray-700 mb-2">
-                Link Dokumen
-              </label>
+              <label htmlFor="linkDocuments" className="block text-sm font-medium text-gray-700 mb-2">Link Dokumen</label>
               <input
                 type="url"
                 id="linkDocuments"
@@ -285,9 +323,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="noAgenda" className="block text-sm font-medium text-gray-700 mb-2">
-                No. Agenda
-              </label>
+              <label htmlFor="noAgenda" className="block text-sm font-medium text-gray-700 mb-2">No. Agenda</label>
               <input
                 type="text"
                 id="noAgenda"
@@ -300,9 +336,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="kelompokAsalSurat" className="block text-sm font-medium text-gray-700 mb-2">
-                Kelompok Asal Surat
-              </label>
+              <label htmlFor="kelompokAsalSurat" className="block text-sm font-medium text-gray-700 mb-2">Kelompok Asal Surat</label>
               <input
                 type="text"
                 id="kelompokAsalSurat"
@@ -315,9 +349,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="agendaSestama" className="block text-sm font-medium text-gray-700 mb-2">
-                Agenda Sestama
-              </label>
+              <label htmlFor="agendaSestama" className="block text-sm font-medium text-gray-700 mb-2">Agenda Sestama</label>
               <input
                 type="text"
                 id="agendaSestama"
@@ -329,9 +361,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="noSurat" className="block text-sm font-medium text-gray-700 mb-2">
-                No. Surat
-              </label>
+              <label htmlFor="noSurat" className="block text-sm font-medium text-gray-700 mb-2">No. Surat</label>
               <input
                 type="text"
                 id="noSurat"
@@ -344,9 +374,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="hal" className="block text-sm font-medium text-gray-700 mb-2">
-                Hal
-              </label>
+              <label htmlFor="hal" className="block text-sm font-medium text-gray-700 mb-2">Hal</label>
               <input
                 type="text"
                 id="hal"
@@ -359,9 +387,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="dari" className="block text-sm font-medium text-gray-700 mb-2">
-                Dari
-              </label>
+              <label htmlFor="dari" className="block text-sm font-medium text-gray-700 mb-2">Dari</label>
               <input
                 type="text"
                 id="dari"
@@ -374,9 +400,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="tanggalAgenda" className="block text-sm font-medium text-gray-700 mb-2">
-                Tgl. Agenda
-              </label>
+              <label htmlFor="tanggalAgenda" className="block text-sm font-medium text-gray-700 mb-2">Tgl. Agenda</label>
               <input
                 type="date"
                 id="tanggalAgenda"
@@ -389,9 +413,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
             </div>
 
             <div>
-              <label htmlFor="tanggalSurat" className="block text-sm font-medium text-gray-700 mb-2">
-                Tanggal Surat
-              </label>
+              <label htmlFor="tanggalSurat" className="block text-sm font-medium text-gray-700 mb-2">Tanggal Surat</label>
               <input
                 type="date"
                 id="tanggalSurat"
@@ -480,7 +502,6 @@ export function ReportForm({ report, onSubmit, onCancel }) {
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        {/* Tombol Unduh Blob Dihapus/Diganti Link Langsung (jika fileUrl valid) */}
                         {file.fileUrl && (
                           <a
                             href={file.fileUrl}

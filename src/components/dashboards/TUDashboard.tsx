@@ -200,6 +200,12 @@ export function TUDashboard() {
       dari: currentUser?.full_name || currentUser?.name || "Pengguna TU",
       status: "draft",
       created_by: reportCreatorId,
+      no_agenda: reportData.noAgenda,
+      kelompok_asal_surat: reportData.kelompokAsalSurat,
+      agenda_sestama: reportData.agendaSestama,
+      tanggal_agenda: reportData.tanggalAgenda,
+      tanggal_surat: reportData.tanggalSurat,
+      link_documents: reportData.linkDocuments,
     };
 
     if (editingReport) {

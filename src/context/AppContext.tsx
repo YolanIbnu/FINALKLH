@@ -26,7 +26,7 @@ type AppAction =
   | { type: "ADD_REPORT"; payload: Report }
   | { type: "UPDATE_REPORT"; payload: Report }
   | { type: "DELETE_REPORT"; payload: string }
-  // Tipe aksi lain bisa ditambahkan di sini jika perlu
+// Tipe aksi lain bisa ditambahkan di sini jika perlu
 
 // State Awal
 const initialState: AppState = {
@@ -48,10 +48,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
       localStorage.removeItem("sitrack_app_state")
       return { ...initialState }
     case "SET_USERS":
-        return { ...state, users: action.payload }
+      return { ...state, users: action.payload }
     case "ADD_USER":
-        if (state.users.some(u => u.id === action.payload.id)) return state
-        return { ...state, users: [...state.users, action.payload] }
+      if (state.users.some(u => u.id === action.payload.id)) return state
+      return { ...state, users: [...state.users, action.payload] }
     case "UPDATE_USER":
       return { ...state, users: state.users.map((u) => (u.id === action.payload.id ? action.payload : u)) }
     case "DELETE_USER":
@@ -94,8 +94,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { data: usersData, error: usersError } = await supabase.from("profiles").select("*")
       if (usersError) console.error("Error fetching users:", usersError)
       else if (usersData) dispatch({ type: "SET_USERS", payload: usersData as User[] })
-      
-      const { data: reportsData, error: reportsError } = await supabase.from("reports").select("*").order("created_at", { ascending: false })
+
+      const { data: reportsData, error: reportsError } = await supabase.from("reports").select("*, file_attachments(*)").order("created_at", { ascending: false })
       if (reportsError) console.error("Error fetching reports:", reportsError)
       else if (reportsData) dispatch({ type: "SET_REPORTS", payload: reportsData as Report[] })
     }
@@ -120,9 +120,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const profileChannel = supabase
       .channel("profiles-realtime-public")
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, (payload) => {
-         if (payload.eventType === "INSERT") dispatch({ type: "ADD_USER", payload: payload.new as User })
-         if (payload.eventType === "UPDATE") dispatch({ type: "UPDATE_USER", payload: payload.new as User })
-         if (payload.eventType === "DELETE") dispatch({ type: "DELETE_USER", payload: (payload.old as any).id })
+        if (payload.eventType === "INSERT") dispatch({ type: "ADD_USER", payload: payload.new as User })
+        if (payload.eventType === "UPDATE") dispatch({ type: "UPDATE_USER", payload: payload.new as User })
+        if (payload.eventType === "DELETE") dispatch({ type: "DELETE_USER", payload: (payload.old as any).id })
       })
       .subscribe()
 
