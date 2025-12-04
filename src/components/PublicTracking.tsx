@@ -163,6 +163,7 @@ export function PublicTracking() {
         }
     };
 
+
     return (
         <div className="bg-gray-50 p-4 sm:p-8 flex flex-col items-center min-h-screen">
             <div className="w-full max-w-3xl">
