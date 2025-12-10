@@ -197,8 +197,13 @@ export function ReportForm({ report, onSubmit, onCancel }) {
                 </select>
               </div>
             )}
-            {/* Field Input Lainnya (Simplified for brevity, but include all fields) */}
-            <div className="md:col-span-2"><label className="block text-sm font-medium mb-1">Link Dokumen</label><input type="url" name="linkDocuments" value={formData.linkDocuments} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg" /></div>
+            {/* Field Input Link Dokumen telah diubah dari type="url" menjadi type="text" */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium mb-1">Link Dokumen</label>
+              {/* === PERUBAHAN UTAMA DI SINI === */}
+              <input type="text" name="linkDocuments" value={formData.linkDocuments} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg" />
+            </div>
+
             <div><label className="block text-sm font-medium mb-1">No Agenda</label><input type="text" name="noAgenda" value={formData.noAgenda} onChange={handleChange} required className="w-full px-3 py-2 border rounded-lg" /></div>
             <div><label className="block text-sm font-medium mb-1">Kelompok Asal Surat</label><input type="text" name="kelompokAsalSurat" value={formData.kelompokAsalSurat} onChange={handleChange} required className="w-full px-3 py-2 border rounded-lg" /></div>
             <div><label className="block text-sm font-medium mb-1">Agenda Sestama</label><input type="text" name="agendaSestama" value={formData.agendaSestama} onChange={handleChange} className="w-full px-3 py-2 border rounded-lg" /></div>
