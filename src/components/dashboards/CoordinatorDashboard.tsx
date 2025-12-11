@@ -1,13 +1,13 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useApp } from "../../context/AppContext"
 import { supabase } from "../../../lib/supabaseClient"
 import { toast } from "../../../lib/toast";
 import {
   UserPlus, AlertTriangle, FileText, Clock,
   CheckCircle, Search, Eye, LogOut, Send, XCircle, Calendar,
-  Check, X, Download,
+  Check, X, Download, ChevronLeft, ChevronRight, Loader2
 } from "lucide-react"
 // Pastikan SUB_SERVICES_MAP dan SERVICES diimport dari types
 import { Report, SERVICES, SUB_SERVICES_MAP } from "../../types"
@@ -378,6 +378,10 @@ export function CoordinatorDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const [forwardingId, setForwardingId] = useState<string | null>(null);
 
+  // --- Paginasi State Baru ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const reportsPerPage = 20;
+
   const fetchData = async (showLoadingSpinner = false) => {
     if (!currentUser?.id) return;
     if (showLoadingSpinner) setLoading(true);
@@ -386,7 +390,7 @@ export function CoordinatorDashboard() {
       const { data: reportsData, error: reportsError } = await supabase
         .from('reports')
         .select('*, task_assignments(*)')
-        .or(`status.eq.forwarded-to-coordinator,current_holder.eq.${currentUser.id},status.eq.in-progress,status.eq.revision-required`)
+        .or(`status.eq.forwarded-to-coordinator,current_holder.eq.${currentUser.id},status.eq.in-progress,status.eq.revision-required,status.eq.pending-approval-koordinator`) // Tambahkan status pending-approval-koordinator jika ada
         .order('created_at', { ascending: false });
 
       if (reportsError) throw reportsError;
@@ -535,18 +539,20 @@ export function CoordinatorDashboard() {
       return { text: 'Perlu Revisi', value: 'revision-required', color: 'text-red-600', icon: XCircle };
     }
     if (report.task_assignments?.some(a => a.status === 'completed' && a.revised_file_path)) {
-      return { text: 'Revisi Masuk (Perlu Review)', value: 'pending-review-revisi', color: 'text-cyan-600', icon: Eye };
+      return { text: 'Revisi Masuk (Review)', value: 'pending-review-revisi', color: 'text-cyan-600', icon: Eye };
     }
     const allTasksDone = report.task_assignments?.length > 0 &&
       report.task_assignments.every(a => a.status === 'completed' || a.status === 'pending-review');
 
     if (allTasksDone) {
-      return { text: 'Tugas Selesai (Review Akhir)', value: 'pending-review-baru', color: 'text-orange-600', icon: CheckCircle };
+      return { text: 'Tugas Selesai (Review)', value: 'pending-review-baru', color: 'text-orange-600', icon: CheckCircle };
     }
 
     if (report.status === 'completed') return { text: 'Selesai', value: 'completed', color: 'text-green-600', icon: CheckCircle };
     if (report.status === 'forwarded-to-coordinator') return { text: 'Perlu Tindakan', value: 'forwarded-to-coordinator', color: 'text-purple-600', icon: Send };
     if (report.status === 'in-progress') return { text: 'Dikerjakan Staff', value: 'in-progress', color: 'text-blue-600', icon: Clock };
+    if (report.status === 'pending-approval-koordinator') return { text: 'Review Staff', value: 'pending-approval-koordinator', color: 'text-orange-600', icon: Clock };
+
 
     return { text: report.status, value: report.status, color: 'text-gray-600', icon: AlertTriangle };
   };
@@ -563,41 +569,58 @@ export function CoordinatorDashboard() {
   };
 
   // --- LOGIC FILTER DROPDOWN DINAMIS ---
-  // 1. Tentukan Spesialisasi berdasarkan nama user
   const currentCoordinatorName = currentUser?.full_name || currentUser?.name || "";
   const specializedCategory = COORDINATOR_SPECIALIZATION[currentCoordinatorName];
 
-  // 2. Tentukan Opsi Dropdown (Jika spesialisasi ada, ambil sub-layanan. Jika tidak, ambil Main Services)
   const serviceOptions = specializedCategory
     ? SUB_SERVICES_MAP[specializedCategory] || []
     : SERVICES;
 
-  // 3. Filter Reports
-  const filteredReports = localReports.filter(report => {
-    // Logic: Jika user memilih opsi filter, cocokkan dengan sub_layanan ATAU layanan utama
-    const matchesService = !serviceFilter ||
-      report.sub_layanan === serviceFilter ||
-      report.layanan === serviceFilter;
+  // 3. Filter Reports (sebelum paginasi)
+  const allFilteredReports = useMemo(() => {
+    return localReports.filter(report => {
+      const matchesService = !serviceFilter ||
+        report.sub_layanan === serviceFilter ||
+        report.layanan === serviceFilter;
 
-    const matchesSearch =
-      !searchQuery ||
-      report.hal?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      report.no_surat?.toLowerCase().includes(searchQuery.toLowerCase());
-    const displayStatusValue = getStatusInfo(report).value;
-    const matchesStatus = !statusFilter || displayStatusValue === statusFilter;
-    return matchesService && matchesStatus && matchesSearch;
-  });
+      const matchesSearch =
+        !searchQuery ||
+        report.hal?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        report.no_surat?.toLowerCase().includes(searchQuery.toLowerCase());
+      const displayStatusValue = getStatusInfo(report).value;
+      const matchesStatus = !statusFilter || displayStatusValue === statusFilter;
+      return matchesService && matchesStatus && matchesSearch;
+    });
+  }, [localReports, serviceFilter, statusFilter, searchQuery]);
 
-  const stats = {
-    totalLaporan: localReports.length,
-    perluTindakan: localReports.filter(r => r.status === 'forwarded-to-coordinator').length,
-    selesai: localReports.filter(r => r.status === 'completed').length,
-    revisi: localReports.filter(r => getStatusInfo(r).value === 'revision-required').length,
-    menungguReview: localReports.filter(r =>
-      getStatusInfo(r).value === 'pending-review-revisi' ||
-      getStatusInfo(r).value === 'pending-review-baru'
-    ).length,
+  // --- LOGIC PAGINASI ---
+  const totalPages = Math.ceil(allFilteredReports.length / reportsPerPage);
+  const currentReports = useMemo(() => {
+    const startIndex = (currentPage - 1) * reportsPerPage;
+    const endIndex = startIndex + reportsPerPage;
+    return allFilteredReports.slice(startIndex, endIndex);
+  }, [allFilteredReports, currentPage, reportsPerPage]);
+
+  const handlePageChange = (page: number) => {
+    if (page > 0 && page <= totalPages) {
+      setCurrentPage(page);
+    }
   };
+
+  // --- LOGIC STATS ---
+  const stats = useMemo(() => {
+    return {
+      totalLaporan: allFilteredReports.length,
+      perluTindakan: allFilteredReports.filter(r => getStatusInfo(r).value === 'forwarded-to-coordinator').length,
+      selesai: allFilteredReports.filter(r => getStatusInfo(r).value === 'completed').length,
+      revisi: allFilteredReports.filter(r => getStatusInfo(r).value === 'revision-required').length,
+      menungguReview: allFilteredReports.filter(r =>
+        getStatusInfo(r).value === 'pending-review-revisi' ||
+        getStatusInfo(r).value === 'pending-review-baru'
+      ).length,
+    };
+  }, [allFilteredReports]);
+
 
   const handleLogout = () => dispatch({ type: "LOGOUT" });
 
@@ -610,7 +633,7 @@ export function CoordinatorDashboard() {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
         <div className="flex flex-col items-center gap-3">
-          <Clock className="w-8 h-8 text-blue-600 animate-spin" />
+          <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
           <p className="text-gray-500 font-medium">Memuat data koordinator...</p>
         </div>
       </div>
@@ -618,10 +641,10 @@ export function CoordinatorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans">
-      <div className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-40 shadow-sm">
+    <div className="min-h-screen bg-gray-100 font-sans">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-4 sticky top-0 z-40 shadow-md">
         {/* --- Header --- */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between max-w-7xl mx-auto">
           <div>
             <h1 className="text-xl font-bold text-gray-900 tracking-tight">Dashboard Koordinator</h1>
             <div className="flex items-center gap-2 text-sm text-gray-500 mt-1">
@@ -641,7 +664,7 @@ export function CoordinatorDashboard() {
                   <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div> Online
                 </div>
               </div>
-              <div className="w-9 h-9 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base shadow-lg">
                 {(currentUser.name || currentUser.full_name)?.charAt(0).toUpperCase() || "K"}
               </div>
             </div>
@@ -651,35 +674,35 @@ export function CoordinatorDashboard() {
 
       <div className="p-4 sm:p-6 max-w-7xl mx-auto">
 
-        {/* --- Statistik Cards --- */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
-            <div className="p-3 bg-blue-50 rounded-lg text-blue-600"><FileText className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.totalLaporan}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Total Laporan</div></div>
+        {/* --- Statistik Cards (Desain Modern) --- */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+          <div className="bg-white rounded-xl shadow-lg p-5 flex flex-col items-start transition-all hover:shadow-xl border-t-4 border-blue-500">
+            <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><FileText className="w-5 h-5" /></div>
+            <div className="mt-3"><div className="text-2xl font-extrabold text-gray-900">{stats.totalLaporan}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide mt-1">Total Laporan</div></div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
-            <div className="p-3 bg-purple-50 rounded-lg text-purple-600"><AlertTriangle className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.perluTindakan}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Perlu Tindakan</div></div>
+          <div className="bg-white rounded-xl shadow-lg p-5 flex flex-col items-start transition-all hover:shadow-xl border-t-4 border-purple-500">
+            <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><AlertTriangle className="w-5 h-5" /></div>
+            <div className="mt-3"><div className="text-2xl font-extrabold text-gray-900">{stats.perluTindakan}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide mt-1">Perlu Tindakan</div></div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
-            <div className="p-3 bg-cyan-50 rounded-lg text-cyan-600"><Eye className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.menungguReview}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Menunggu Review</div></div>
+          <div className="bg-white rounded-xl shadow-lg p-5 flex flex-col items-start transition-all hover:shadow-xl border-t-4 border-cyan-500">
+            <div className="p-2 bg-cyan-50 rounded-lg text-cyan-600"><Eye className="w-5 h-5" /></div>
+            <div className="mt-3"><div className="text-2xl font-extrabold text-gray-900">{stats.menungguReview}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide mt-1">Menunggu Review</div></div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
-            <div className="p-3 bg-red-50 rounded-lg text-red-600"><XCircle className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.revisi}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Sedang Revisi</div></div>
+          <div className="bg-white rounded-xl shadow-lg p-5 flex flex-col items-start transition-all hover:shadow-xl border-t-4 border-red-500">
+            <div className="p-2 bg-red-50 rounded-lg text-red-600"><XCircle className="w-5 h-5" /></div>
+            <div className="mt-3"><div className="text-2xl font-extrabold text-gray-900">{stats.revisi}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide mt-1">Sedang Revisi</div></div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex items-center gap-4 transition-transform hover:scale-[1.02]">
-            <div className="p-3 bg-green-50 rounded-lg text-green-600"><CheckCircle className="w-6 h-6" /></div>
-            <div><div className="text-2xl font-bold text-gray-900">{stats.selesai}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide">Selesai</div></div>
+          <div className="bg-white rounded-xl shadow-lg p-5 flex flex-col items-start transition-all hover:shadow-xl border-t-4 border-green-500">
+            <div className="p-2 bg-green-50 rounded-lg text-green-600"><CheckCircle className="w-5 h-5" /></div>
+            <div className="mt-3"><div className="text-2xl font-extrabold text-gray-900">{stats.selesai}</div><div className="text-xs text-gray-500 font-medium uppercase tracking-wide mt-1">Selesai</div></div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           {/* --- Filter Bar --- */}
-          <div className="p-5 border-b border-gray-200 bg-gray-50/50">
+          <div className="p-5 border-b border-gray-200 bg-gray-50">
             <div className="flex flex-col md:flex-row gap-4 justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-gray-800">Daftar Laporan</h2>
+              <h2 className="text-lg font-bold text-gray-800">Daftar Laporan ({allFilteredReports.length} Ditemukan)</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <div className="relative sm:col-span-2 lg:col-span-2">
@@ -721,7 +744,6 @@ export function CoordinatorDashboard() {
                 <tr>
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Laporan</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Dari</th>
-                  {/* KOLOM BARU: LAYANAN */}
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Layanan</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider hidden md:table-cell">Progress</th>
@@ -729,18 +751,17 @@ export function CoordinatorDashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredReports.map(report => {
+                {currentReports.map(report => {
                   const status = getStatusInfo(report);
                   const progress = getReportProgress(report);
                   return (
                     <tr key={(report as any).id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="font-semibold text-gray-900 line-clamp-2">{report.hal}</div>
-                        <div className="text-xs text-gray-500 mt-1 font-mono">{report.no_surat}</div>
+                        <div className="text-xs text-gray-500 mt-1 font-mono break-words">{report.no_surat}</div>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600 hidden md:table-cell">{getProfileName((report as any).created_by)}</td>
 
-                      {/* ISI KOLOM LAYANAN */}
                       <td className="px-6 py-4 text-sm text-gray-600 hidden md:table-cell">
                         {report.sub_layanan || report.layanan}
                       </td>
@@ -772,7 +793,7 @@ export function CoordinatorDashboard() {
                           )}
 
                           {/* TOMBOL UMUM */}
-                          {status.value !== 'pending-review-revisi' && (
+                          {status.value !== 'pending-review-revisi' && status.value !== 'pending-review-baru' && (
                             <>
                               <button onClick={() => setSelectedReport(report)} className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors" title="Lihat Detail"><Eye className="w-5 h-5" /></button>
                               <button onClick={() => setAddStaffReport(report)} className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors" title="Atur Staff"><UserPlus className="w-5 h-5" /></button>
@@ -782,37 +803,66 @@ export function CoordinatorDashboard() {
 
                           {/* TOMBOL REVIEW TUGAS REGULAR/AKHIR (Orange) */}
                           {status.value === 'pending-review-baru' && (
-                            <button
-                              onClick={() => setReviewTaskReport(report)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-500 text-white rounded-md hover:bg-orange-600 shadow-sm transition-all ml-1"
-                              title="Review tugas staff sebelum ke TU"
-                            >
-                              <CheckCircle className="w-3.5 h-3.5" /> Review Akhir
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setReviewTaskReport(report)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-500 text-white rounded-md hover:bg-orange-600 shadow-sm transition-all"
+                                title="Review tugas staff sebelum ke TU"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" /> Review Akhir
+                              </button>
+
+                              {/* SHORTCUT: Langsung Forward ke TU jika sudah clear */}
+                              <button
+                                onClick={() => handleQuickForwardToTU(report)}
+                                disabled={forwardingId === (report as any).id}
+                                className="p-1.5 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50"
+                                title="Setujui & Teruskan ke TU (Aksi Cepat)"
+                              >
+                                {forwardingId === (report as any).id ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                              </button>
+                            </div>
                           )}
 
-                          {/* SHORTCUT: Langsung Forward ke TU jika sudah clear */}
-                          {status.value === 'pending-review-baru' && (
-                            <button
-                              onClick={() => handleQuickForwardToTU(report)}
-                              disabled={forwardingId === (report as any).id}
-                              className="p-1.5 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50"
-                              title="Setujui & Teruskan ke TU"
-                            >
-                              {forwardingId === (report as any).id ? <Clock className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
                   );
                 })}
-                {filteredReports.length === 0 && (
+                {currentReports.length === 0 && (
                   <tr><td colSpan={6} className="text-center py-12 text-gray-500">Tidak ada laporan yang cocok dengan filter Anda.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
+
+          {/* --- Paginasi Kontrol --- */}
+          {allFilteredReports.length > reportsPerPage && (
+            <div className="flex justify-between items-center p-4 border-t bg-gray-50">
+              <div className="text-sm text-gray-700">
+                Menampilkan {((currentPage - 1) * reportsPerPage) + 1} sampai {Math.min(currentPage * reportsPerPage, allFilteredReports.length)} dari {allFilteredReports.length} laporan
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="p-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <span className="text-sm font-medium text-gray-700">
+                  Halaman {currentPage} dari {totalPages}
+                </span>
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="p-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

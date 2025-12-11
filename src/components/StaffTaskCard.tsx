@@ -1,10 +1,17 @@
-"use client"
+// StaffTaskCard.tsx
 
-// Komponen ini hanya bertanggung jawab untuk menampilkan satu item tugas di daftar.
-export function StaffTaskCard({ task, onSelect, isSelected }) {
+import { TaskAssignment } from './StaffDashboard'; // Asumsi TaskAssignment diimpor
+
+interface StaffTaskCardProps {
+  task: TaskAssignment;
+  onClick: () => void; // Tipe yang benar adalah onClick
+  isSelected: boolean;
+}
+
+export function StaffTaskCard({ task, onClick, isSelected }: StaffTaskCardProps) {
   return (
     <div
-      onClick={onSelect}
+      onClick={onClick}
       className={`p-4 border-b cursor-pointer transition-all duration-150 ${isSelected ? 'bg-blue-50 border-l-4 border-blue-500' : 'hover:bg-gray-50'}`}
     >
       <div className="flex justify-between items-center">
