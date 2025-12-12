@@ -140,7 +140,7 @@ export function Login() {
           <img
             src="/flow.png"
             alt="Logo Flow Administrasi"
-            className="h-24 w-auto mb-8"
+            className="h-20 w-auto mb-6" // Diubah ke h-20 (lebih kecil dari h-24), mb-6 agar lebih dekat ke judul
           />
           {/* END LOGO BARU */}
 
