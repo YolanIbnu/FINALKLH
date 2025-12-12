@@ -796,7 +796,7 @@ export function CoordinatorDashboard() {
                           {status.value !== 'pending-review-revisi' && status.value !== 'pending-review-baru' && (
                             <>
                               <button onClick={() => setSelectedReport(report)} className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors" title="Lihat Detail"><Eye className="w-5 h-5" /></button>
-                              <button onClick={() => setAddStaffReport(report)} className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors" title="Atur Staff"><UserPlus className="w-5 h-5" /></button>
+                              {/* Tombol Atur Staff dihapus dari sini */}
                               <button onClick={() => setRevisionReport(report)} className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-md transition-colors" title="Kembalikan / Revisi"><AlertTriangle className="w-5 h-5" /></button>
                             </>
                           )}
@@ -804,6 +804,15 @@ export function CoordinatorDashboard() {
                           {/* TOMBOL REVIEW TUGAS REGULAR/AKHIR (Orange) */}
                           {status.value === 'pending-review-baru' && (
                             <div className="flex items-center gap-2">
+                              {/* 1. Tombol Atur Staff - DITAMBAHKAN DI SINI */}
+                              <button
+                                onClick={() => setAddStaffReport(report)}
+                                className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors"
+                                title="Atur Staff Tambahan"
+                              >
+                                <UserPlus className="w-5 h-5" />
+                              </button>
+
                               <button
                                 onClick={() => setReviewTaskReport(report)}
                                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-orange-500 text-white rounded-md hover:bg-orange-600 shadow-sm transition-all"

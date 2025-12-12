@@ -34,6 +34,14 @@ import { ForwardForm } from "../forms/ForwardForm"
 // Jumlah item per halaman
 const ITEMS_PER_PAGE = 25;
 
+// Ubah definisi state untuk staffTasks agar menyertakan 'isRevised'
+export type StaffTask = {
+  id: string;
+  staffName: string;
+  fileUrl: string | null;
+  isRevised: boolean; // Menambahkan penanda revisi
+};
+
 export function TUDashboard() {
   const { state, dispatch } = useApp()
   const { reports, users: profiles, currentUser } = state
@@ -55,8 +63,8 @@ export function TUDashboard() {
   const [finalizingId, setFinalizingId] = useState<string | null>(null);
   const [isFileLoading, setIsFileLoading] = useState(false);
 
-  // State Data Detail
-  const [staffTasks, setStaffTasks] = useState<{ id: string, staffName: string, fileUrl: string | null }[]>([]);
+  // State Data Detail - Menggunakan tipe StaffTask yang baru
+  const [staffTasks, setStaffTasks] = useState<StaffTask[]>([]);
   const [originalAttachments, setOriginalAttachments] = useState<any[]>([]);
 
   // State Paginasi
@@ -129,17 +137,19 @@ export function TUDashboard() {
         .order('created_at', { ascending: false });
 
       if (tasksData && tasksData.length > 0) {
-        const loadedTasks = tasksData.map(task => {
+        const loadedTasks: StaffTask[] = tasksData.map(task => {
           const staffProfile = profiles.find(p => p.id === task.staff_id);
           const staffName = staffProfile?.full_name || staffProfile?.name || "Staff Tidak Dikenali";
 
           let rawPath = null;
           let targetBucket = '';
+          let isRevised = false; // Inisialisasi status revisi
 
           // Prioritas Revised File Path
           if (task.revised_file_path) {
             rawPath = task.revised_file_path;
             targetBucket = 'revised_documents';
+            isRevised = true; // Set true jika menggunakan revised_file_path
           } else if (task.file_path) {
             rawPath = task.file_path;
             targetBucket = 'documents';
@@ -154,7 +164,7 @@ export function TUDashboard() {
             fileUrl = storageData.publicUrl;
           }
 
-          return { id: task.id, staffName, fileUrl };
+          return { id: task.id, staffName, fileUrl, isRevised }; // Mengembalikan status revisi
         });
         setStaffTasks(loadedTasks);
       }
@@ -220,7 +230,7 @@ export function TUDashboard() {
     try {
       const response = await fetch("/api/reports", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application-json" },
         body: JSON.stringify({
           id: reportId,
           status: "forwarded-to-coordinator",
@@ -318,8 +328,6 @@ export function TUDashboard() {
       }
     }
   }, [showReportForm, filteredReports.length]); // Dependency pada length untuk memicu saat data berubah
-  // Catatan: currentPage dihapus dari dependency di sini untuk mencegah loop tak terbatas, 
-  // karena hook ini yang mengatur currentPage.
 
   // Statistik
   const stats = [
@@ -550,7 +558,12 @@ export function TUDashboard() {
                       <DetailItem label="No. Agenda" value={viewingReport.no_agenda || "-"} />
                       <DetailItem label="No. Surat" value={viewingReport.no_surat} />
                       <DetailItem label="Hal" value={viewingReport.hal} />
-                      <DetailItem label="Tgl. Masuk" value={new Date(viewingReport.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} />
+
+                      {/* BARIS YANG DIUBAH: Menggunakan viewingReport.tanggal_agenda */}
+                      <DetailItem
+                        label="Tgl. Agenda"
+                        value={viewingReport.tanggal_agenda ? new Date(viewingReport.tanggal_agenda).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : "-"}
+                      />
                     </div>
                   </div>
 
@@ -559,6 +572,7 @@ export function TUDashboard() {
                     <div className="space-y-3 text-sm">
                       <DetailItem label="Dari" value={viewingReport.dari} />
                       <DetailItem label="Tanggal Surat" value={new Date(viewingReport.tanggal_surat).toLocaleDateString('id-ID')} />
+                      <DetailItem label="Tgl. Masuk Sistem" value={new Date(viewingReport.created_at).toLocaleDateString('id-ID')} />
                       <div className="grid grid-cols-2">
                         <div className="text-gray-500">Link Dokumen</div>
                         <div className="font-medium text-blue-600 truncate">
@@ -584,13 +598,14 @@ export function TUDashboard() {
                     iconColor="text-blue-500"
                   />
 
-                  {/* Hasil Kerja Staff */}
+                  {/* Hasil Kerja Staff - Di sini penanda revisi ditambahkan */}
                   <FileSection
                     title="Hasil Pengerjaan Staff"
                     isLoading={isFileLoading}
                     files={staffTasks.filter(t => t.fileUrl).map(t => ({
                       name: `${t.staffName} (Hasil)`,
-                      url: t.fileUrl
+                      url: t.fileUrl,
+                      isRevised: t.isRevised // Menyertakan status revisi
                     }))}
                     emptyMessage="Belum ada dokumen hasil/revisi dari staff."
                     icon={FileText}
@@ -632,10 +647,11 @@ const DetailItem = ({ label, value, status, statusMap, getStatusColor }: { label
   </div>
 );
 
+// Komponen Pembantu untuk File Section - Diperbarui untuk isRevised
 const FileSection = ({ title, isLoading, files, emptyMessage, icon: Icon, iconColor, bgColor = 'bg-gray-50', borderColor = 'border-gray-100', downloadText = 'Download' }: {
   title: string;
   isLoading: boolean;
-  files: { name: string; url: string | null; }[];
+  files: { name: string; url: string | null; isRevised?: boolean }[]; // Menambahkan isRevised opsional
   emptyMessage: string;
   icon: any;
   iconColor: string;
@@ -657,6 +673,12 @@ const FileSection = ({ title, isLoading, files, emptyMessage, icon: Icon, iconCo
               <div className="flex items-center gap-3 truncate">
                 <Icon className={`w-4 h-4 ${iconColor} flex-shrink-0`} />
                 <span className="truncate text-gray-700 font-medium">{file.name}</span>
+                {/* LOGIKA BARU: Tampilkan badge REVISI */}
+                {file.isRevised && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200 flex-shrink-0">
+                    REVISI
+                  </span>
+                )}
               </div>
               <a
                 href={file.url || '#'}

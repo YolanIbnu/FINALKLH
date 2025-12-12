@@ -11,17 +11,23 @@ import { TODO_ITEMS, FileAttachment } from "../../types";
 import { FileViewer } from "../FileViewer";
 
 // Fungsi utilitas untuk memformat tanggal
-const formatDate = (dateString: string | null) => {
+const formatDate = (dateString: string | null, includeTime: boolean = true) => {
   if (!dateString) return "-";
   try {
-    return new Date(dateString).toLocaleDateString('id-ID', {
+    const options: Intl.DateTimeFormatOptions = {
       day: '2-digit',
       month: 'long',
       year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
       timeZone: 'Asia/Jakarta'
-    });
+    };
+
+    // Tambahkan jam dan menit jika includeTime adalah true
+    if (includeTime) {
+      options.hour = '2-digit';
+      options.minute = '2-digit';
+    }
+
+    return new Date(dateString).toLocaleDateString('id-ID', options);
   } catch {
     return dateString;
   }
@@ -141,7 +147,13 @@ export function ReportDetailsModal({ report, profiles, onClose }) {
       }).eq('id', report.id);
 
       toast.success("Tugas berhasil ditugaskan!");
-      onClose();
+
+      // --- PENYESUAIAN 1: Reset kolom penugasan ---
+      setSelectedStaffIds([]);
+      setSelectedTodos([]);
+      setNotes("");
+      // Tidak perlu onClose() di sini agar modal tetap terbuka dan user bisa menugaskan staff lain jika diperlukan
+
     } catch (error: any) {
       toast.error(error.message);
     } finally {
@@ -215,8 +227,11 @@ export function ReportDetailsModal({ report, profiles, onClose }) {
                   <span className="font-medium text-gray-900 break-words">{report.hal || "-"}</span>
                   <span className="text-gray-500">Dari:</span>
                   <span className="font-medium text-gray-900 break-words">{report.dari || "-"}</span>
+
+                  {/* --- PENYESUAIAN 2: Hilangkan jam pada tanggal surat --- */}
                   <span className="text-gray-500">Tanggal Surat:</span>
-                  <span className="font-medium text-gray-900 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {formatDate(report.tanggal_surat)}</span>
+                  <span className="font-medium text-gray-900 flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {formatDate(report.tanggal_surat, false)}</span>
+
                   <span className="text-gray-500">Diterima TU:</span>
                   <span className="font-medium text-gray-900 flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {formatDate(report.created_at)}</span>
                 </div>
@@ -318,7 +333,7 @@ export function ReportDetailsModal({ report, profiles, onClose }) {
                   {availableStaff.length > 0 ? (
                     availableStaff.map((staff: any) => (
                       <label key={staff.id} className="flex items-center p-2 hover:bg-gray-100 rounded cursor-pointer transition-colors">
-                        <input type="checkbox" onChange={(e) => handleStaffChange(staff.id, e.target.checked)} className="form-checkbox h-4 w-4 text-blue-600 rounded" />
+                        <input type="checkbox" onChange={(e) => handleStaffChange(staff.id, e.target.checked)} checked={selectedStaffIds.includes(staff.id)} className="form-checkbox h-4 w-4 text-blue-600 rounded" />
                         <span className="ml-3 text-sm font-medium">{staff.full_name}</span>
                       </label>
                     ))
