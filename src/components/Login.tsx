@@ -136,6 +136,14 @@ export function Login() {
     <div className="min-h-screen bg-gray-50 flex">
       <div className="flex-1 flex flex-col justify-center px-8 lg:px-16">
         <div className="max-w-lg">
+          {/* LOGO BARU: flow.png (Lebih besar dan terpusat) */}
+          <img
+            src="/flow.png"
+            alt="Logo Flow Administrasi"
+            className="h-24 w-auto mb-8"
+          />
+          {/* END LOGO BARU */}
+
           <h1 className="text-4xl font-bold text-gray-900 mb-4 leading-tight">
             PROSES ADMINISTRASI - BIRO SDMO KLH/BPLH
           </h1>
