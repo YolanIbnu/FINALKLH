@@ -230,12 +230,14 @@ export function TUDashboard() {
     try {
       const response = await fetch("/api/reports", {
         method: "PUT",
-        headers: { "Content-Type": "application-json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: reportId,
+          id: forwardingReport.id,
           status: "forwarded-to-coordinator",
           action: "Diteruskan ke Koordinator",
-          notes: notes,
+          notes: formData.notes,
+          // 🔑 KUNCI: Nama variabel harus 'coordinatorId' (cocok dengan route.ts)
+          coordinatorId: formData.coordinatorId,
         }),
       });
 

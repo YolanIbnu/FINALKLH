@@ -6,7 +6,8 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function POST(request: NextRequest) {
   try {
     const reportData = await request.json()
-    const { originalFiles, ...reportFields } = reportData
+    // 🔑 Destructure currentUser agar tidak masuk ke payload insert
+    const { originalFiles, currentUser, ...reportFields } = reportData
 
     const cookieStore = await cookies()
     const supabase = createServerClient(cookieStore)
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Only TU, Admin, and Coordinator can create reports" }, { status: 403 })
     }
 
-    const status = ["draft", "in-progress", "completed", "revision-required", "forwarded-to-tu"].includes(reportFields.status) ? reportFields.status : "draft"
+    const status = ["draft", "in-progress", "completed", "revision-required", "forwarded-to-tu", "forwarded-to-coordinator"].includes(reportFields.status) ? reportFields.status : "draft"
     const priority = ["rendah", "sedang", "tinggi"].includes(reportFields.priority) ? reportFields.priority : "sedang"
 
     const { data: report, error: reportError } = await supabase.from("reports").insert({
@@ -56,12 +57,12 @@ export async function POST(request: NextRequest) {
     if (originalFiles && originalFiles.length > 0) {
       const fileAttachments = originalFiles.map((file: any) => ({
         report_id: report.id,
-        file_name: file.fileName || file.file_name || file.name, // Robust check
-        file_url: file.fileUrl || file.file_url || file.url,     // Robust check
+        file_name: file.fileName || file.file_name || file.name,
+        file_url: file.fileUrl || file.file_url || file.url,
         file_type: "original",
         file_size: file.size || null,
         uploaded_by: user.id,
-      })).filter((f: any) => f.file_url); // Hapus jika URL kosong
+      })).filter((f: any) => f.file_url);
 
       if (fileAttachments.length > 0) {
         await supabase.from("file_attachments").insert(fileAttachments)
@@ -76,12 +77,7 @@ export async function POST(request: NextRequest) {
       notes: `Laporan baru dibuat oleh ${profile.role}`,
     })
 
-    const { data: tracking } = await supabase.from("letter_tracking").select("tracking_number").eq("report_id", report.id).single()
-
-    return NextResponse.json({
-      success: true,
-      report: { ...report, trackingNumber: tracking?.tracking_number || `TRK-${report.id.slice(0, 8)}` },
-    })
+    return NextResponse.json({ success: true, report })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || "Server Error" }, { status: 500 })
   }
@@ -91,7 +87,8 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, action, notes, currentUser, originalFiles, ...reportData } = body;
+    // 🔑 Tambahkan coordinatorId di sini untuk ditangkap dari body
+    const { id, action, notes, currentUser, originalFiles, coordinatorId, ...reportData } = body;
 
     if (!id) return NextResponse.json({ error: "ID Laporan diperlukan" }, { status: 400 });
 
@@ -117,29 +114,26 @@ export async function PUT(request: NextRequest) {
       agenda_sestama: reportData.agendaSestama,
       sifat: reportData.sifat,
       derajat: reportData.derajat,
+      // 🔑 Masukkan coordinator_id ke dalam database jika dikirim dari frontend
+      ...(coordinatorId && { coordinator_id: coordinatorId }),
       ...(reportData.status && { status: reportData.status }),
     };
 
+    // Bersihkan payload dari nilai undefined agar tidak error
     Object.keys(updatePayload).forEach(key => updatePayload[key] === undefined && delete updatePayload[key]);
 
     const { data, error } = await supabase.from("reports").update(updatePayload).eq("id", id).select().single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // 2. UPDATE FILE LAMPIRAN (LOGIKA ROBUST / ANTI-GAGAL)
+    // 2. UPDATE FILE LAMPIRAN
     if (originalFiles) {
-      // Hapus file lama
       await supabase.from("file_attachments").delete().eq("report_id", id);
-
       if (originalFiles.length > 0) {
         const filesToInsert = originalFiles.map((file: any) => {
-          // SANGAT PENTING: Cek fileName (Frontend) ATAU file_name (Database)
           const name = file.fileName || file.file_name || file.name || "Lampiran";
-          // SANGAT PENTING: Cek fileUrl (Frontend) ATAU file_url (Database)
           const url = file.fileUrl || file.file_url || file.url;
-
-          if (!url) return null; // Skip jika URL tidak ditemukan
-
+          if (!url) return null;
           return {
             report_id: id,
             file_name: name,
@@ -149,7 +143,7 @@ export async function PUT(request: NextRequest) {
             uploaded_by: user.id,
             created_at: new Date().toISOString()
           };
-        }).filter(Boolean); // Hapus data yang null (error)
+        }).filter(Boolean);
 
         if (filesToInsert.length > 0) {
           const { error: fileError } = await supabase.from("file_attachments").insert(filesToInsert);

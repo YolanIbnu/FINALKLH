@@ -390,8 +390,16 @@ export function CoordinatorDashboard() {
       const { data: reportsData, error: reportsError } = await supabase
         .from('reports')
         .select('*, task_assignments(*)')
-        .or(`status.eq.forwarded-to-coordinator,current_holder.eq.${currentUser.id},status.eq.in-progress,status.eq.revision-required,status.eq.pending-approval-koordinator`) // Tambahkan status pending-approval-koordinator jika ada
+        // 🔑 PERBAIKAN UTAMA DI SINI:
+        // 1. Tambahkan .eq('coordinator_id', currentUser.id) untuk memfilter laporan berdasarkan penerima.
+        // 2. Gabungkan filter ini dengan .or() lainnya menggunakan klausa filter yang lebih kompleks jika diperlukan, atau
+        // 3. (Cara Sederhana) Pastikan semua laporan yang masuk ke dashboard koordinator HANYA yang ditujukan kepadanya.
+        .eq('coordinator_id', currentUser.id) // <--- TAMBAHKAN FILTER INI
+        .or(`status.eq.forwarded-to-coordinator,current_holder.eq.${currentUser.id},status.eq.in-progress,status.eq.revision-required,status.eq.pending-approval-koordinator`)
         .order('created_at', { ascending: false });
+      // Catatan: Jika Anda menggunakan `and` secara implisit (seperti di atas), filter akan menjadi:
+      // (coordinator_id = currentUser.id) AND (status = 'forwarded-to-coordinator' OR status = 'in-progress' OR ...)
+      // Ini adalah cara yang benar untuk memastikan koordinator hanya melihat laporannya.
 
       if (reportsError) throw reportsError;
 
