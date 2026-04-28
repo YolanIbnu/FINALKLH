@@ -26,7 +26,8 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
-  Layers
+  Layers,
+  Undo2
 } from "lucide-react"
 import { ReportForm } from "../forms/ReportForm"
 import { ForwardForm } from "../forms/ForwardForm"
@@ -61,6 +62,7 @@ export function TUDashboard() {
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null)
   const [currentTime, setCurrentTime] = useState(new Date())
   const [finalizingId, setFinalizingId] = useState<string | null>(null);
+  const [pullingBackId, setPullingBackId] = useState<string | null>(null);
   const [isFileLoading, setIsFileLoading] = useState(false);
 
   // State Data Detail - Menggunakan tipe StaffTask yang baru
@@ -153,6 +155,7 @@ export function TUDashboard() {
           } else if (task.file_path) {
             rawPath = task.file_path;
             targetBucket = 'documents';
+            isRevised = true;
           }
 
           let fileUrl = null;
@@ -211,6 +214,67 @@ export function TUDashboard() {
     }
   };
 
+  // --- HANDLE TARIK KEMBALI (PULL BACK) LAPORAN DARI KOORDINATOR ---
+  const handlePullBackReport = async (report: Report, mode: 'draft' | 'delete') => {
+    if (!report || !currentUser) return;
+
+    const confirmMsg = mode === 'draft'
+      ? `Anda yakin ingin MENARIK KEMBALI laporan "${report.hal}" ke status Draft? Disposisi ke Koordinator akan dibatalkan.`
+      : `Anda yakin ingin MENGHAPUS laporan "${report.hal}"? Data disposisi juga akan dihapus. Tindakan ini tidak dapat dibatalkan.`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setPullingBackId(report.id);
+    try {
+      if (mode === 'draft') {
+        // 1. Hapus disposisi terkait laporan ini
+        await supabase.from('disposisi').delete().eq('report_id', report.id);
+
+        // 2. Update status laporan kembali ke draft
+        const { error: updateError } = await supabase
+          .from('reports')
+          .update({ status: 'draft', current_holder: (currentUser as any).user_id || currentUser.id })
+          .eq('id', report.id);
+
+        if (updateError) throw updateError;
+
+        // 3. Catat di workflow_history
+        await supabase.from('workflow_history').insert({
+          report_id: report.id,
+          action: 'Laporan ditarik kembali ke Draft oleh TU',
+          user_id: (currentUser as any).user_id || currentUser.id,
+          status: 'draft',
+          notes: 'Surat yang sudah diteruskan ke Koordinator ditarik kembali untuk diedit ulang.'
+        });
+
+        toast.success("Laporan berhasil ditarik kembali ke Draft.");
+      } else {
+        // Mode hapus: hapus disposisi lalu hapus laporan
+        await supabase.from('disposisi').delete().eq('report_id', report.id);
+        await supabase.from('workflow_history').delete().eq('report_id', report.id);
+        await supabase.from('file_attachments').delete().eq('report_id', report.id);
+        await supabase.from('task_assignments').delete().eq('report_id', report.id);
+
+        const { error: deleteError } = await supabase
+          .from('reports')
+          .delete()
+          .eq('id', report.id);
+
+        if (deleteError) throw deleteError;
+
+        toast.success("Laporan berhasil dihapus.");
+      }
+
+      if (dispatch) dispatch({ type: 'FETCH_REPORTS' });
+    } catch (error: any) {
+      console.error("Error pull-back/delete report:", error);
+      toast.error("Gagal memproses: " + error.message);
+    } finally {
+      setPullingBackId(null);
+      setOpenActionMenu(null);
+    }
+  };
+
   const handleReportSubmit = () => {
     setShowReportForm(false);
     setEditingReport(null);
@@ -218,14 +282,12 @@ export function TUDashboard() {
     if (dispatch) { dispatch({ type: 'FETCH_REPORTS' }); }
   };
 
-  const handleForwardSubmit = async (formData: any) => {
+  // --- 🔥 PERBAIKAN UTAMA: HANDLE FORWARD MULTIPLE COORDINATORS 🔥 ---
+  const handleForwardSubmit = async (formData: { notes: string; coordinatorIds: string[] }) => {
     if (!forwardingReport || !forwardingReport.id) {
       toast.error("Terjadi kesalahan: ID Laporan tidak ditemukan.");
       return;
     }
-
-    const reportId = forwardingReport.id;
-    const notes = formData.notes || "";
 
     try {
       const response = await fetch("/api/reports", {
@@ -236,8 +298,9 @@ export function TUDashboard() {
           status: "forwarded-to-coordinator",
           action: "Diteruskan ke Koordinator",
           notes: formData.notes,
-          // 🔑 KUNCI: Nama variabel harus 'coordinatorId' (cocok dengan route.ts)
-          coordinatorId: formData.coordinatorId,
+
+          // 🔑 MENGIRIM ARRAY ID, BUKAN SINGLE ID
+          coordinatorIds: formData.coordinatorIds,
         }),
       });
 
@@ -246,7 +309,7 @@ export function TUDashboard() {
         throw new Error(result.error || "Gagal meneruskan laporan");
       }
 
-      toast.success("✅ Laporan berhasil diteruskan ke Koordinator");
+      toast.success(`✅ Laporan berhasil diteruskan ke ${formData.coordinatorIds.length} Koordinator`);
       setShowForwardForm(false);
       setForwardingReport(null);
       if (dispatch) dispatch({ type: 'FETCH_REPORTS' });
@@ -279,7 +342,6 @@ export function TUDashboard() {
   }
 
   // --- DEFINISI filteredReports MENGGUNAKAN useMemo ---
-  // Pastikan ini didefinisikan sebelum digunakan oleh useEffect di bawah.
   const filteredReports = useMemo(() => {
     return reports
       .filter((report) => {
@@ -295,8 +357,7 @@ export function TUDashboard() {
 
         return matchesSearch && matchesService;
       })
-      // PERUBAHAN: Urutkan dari yang TERLAMA ke TERBARU (ASC)
-      // Laporan baru (timestamp lebih besar) akan berada di AKHIR daftar.
+      // Urutkan dari yang TERLAMA ke TERBARU (ASC)
       .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [reports, searchQuery, serviceFilter]);
 
@@ -317,19 +378,14 @@ export function TUDashboard() {
   }, [searchQuery, serviceFilter]);
 
   // --- LOGIKA PINDAH KE HALAMAN TERAKHIR SETELAH SUBMIT ---
-  // Hook ini dijalankan SETELAH useMemo di atas selesai.
   useEffect(() => {
-    // Kondisi: Jika form ditutup (setelah submit) DAN ada data laporan
     if (!showReportForm && filteredReports.length > 0) {
-      // Hitung ulang total halaman dan pindah ke halaman terakhir
       const newTotalPages = Math.ceil(filteredReports.length / ITEMS_PER_PAGE);
-
-      // Pindahkan ke halaman terakhir jika saat ini bukan halaman terakhir
       if (currentPage !== newTotalPages) {
         setCurrentPage(newTotalPages);
       }
     }
-  }, [showReportForm, filteredReports.length]); // Dependency pada length untuk memicu saat data berubah
+  }, [showReportForm, filteredReports.length]);
 
   // Statistik
   const stats = [
@@ -472,9 +528,35 @@ export function TUDashboard() {
                                     </button>
                                   </>
                                 )}
+                                {report.status === 'forwarded-to-coordinator' && (
+                                  <>
+                                    <button
+                                      onClick={() => handlePullBackReport(report, 'draft')}
+                                      disabled={pullingBackId === report.id}
+                                      className="w-full flex items-center px-4 py-2.5 text-sm text-orange-700 hover:bg-orange-50 transition-colors border-t border-gray-100"
+                                    >
+                                      {pullingBackId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Undo2 className="w-4 h-4 mr-3" />} Tarik Kembali ke Draft
+                                    </button>
+                                    <button
+                                      onClick={() => handlePullBackReport(report, 'delete')}
+                                      disabled={pullingBackId === report.id}
+                                      className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                    >
+                                      {pullingBackId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Trash2 className="w-4 h-4 mr-3" />} Hapus Laporan
+                                    </button>
+                                  </>
+                                )}
                                 {report.status === 'pending-approval-tu' && (
                                   <button onClick={() => handleFinalizeReport(report)} disabled={finalizingId === report.id} className="w-full flex items-center px-4 py-2.5 text-sm text-green-700 hover:bg-green-50 transition-colors border-t border-gray-100">
                                     {finalizingId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Archive className="w-4 h-4 mr-3" />} Selesaikan & Arsipkan
+                                  </button>
+                                )}
+                                {report.status === 'completed' && (
+                                  <button
+                                    onClick={() => handleDeleteClick(report.id)}
+                                    className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-3" /> Hapus Laporan
                                   </button>
                                 )}
                               </div>
@@ -560,8 +642,6 @@ export function TUDashboard() {
                       <DetailItem label="No. Agenda" value={viewingReport.no_agenda || "-"} />
                       <DetailItem label="No. Surat" value={viewingReport.no_surat} />
                       <DetailItem label="Hal" value={viewingReport.hal} />
-
-                      {/* BARIS YANG DIUBAH: Menggunakan viewingReport.tanggal_agenda */}
                       <DetailItem
                         label="Tgl. Agenda"
                         value={viewingReport.tanggal_agenda ? new Date(viewingReport.tanggal_agenda).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : "-"}
@@ -600,14 +680,14 @@ export function TUDashboard() {
                     iconColor="text-blue-500"
                   />
 
-                  {/* Hasil Kerja Staff - Di sini penanda revisi ditambahkan */}
+                  {/* Hasil Kerja Staff */}
                   <FileSection
-                    title="Hasil Pengerjaan Staff"
+                    title="Output"
                     isLoading={isFileLoading}
                     files={staffTasks.filter(t => t.fileUrl).map(t => ({
                       name: `${t.staffName} (Hasil)`,
                       url: t.fileUrl,
-                      isRevised: t.isRevised // Menyertakan status revisi
+                      isRevised: t.isRevised
                     }))}
                     emptyMessage="Belum ada dokumen hasil/revisi dari staff."
                     icon={FileText}
@@ -628,6 +708,7 @@ export function TUDashboard() {
       )}
 
       {showReportForm && <ReportForm report={editingReport} onSubmit={handleReportSubmit} onCancel={() => { setShowReportForm(false); setEditingReport(null); }} />}
+      {/* ⚠️ Pastikan ForwardForm menerima profiles untuk list user */}
       {showForwardForm && <ForwardForm report={forwardingReport} profiles={profiles} onSubmit={handleForwardSubmit} onCancel={() => { setShowForwardForm(false); setForwardingReport(null); }} />}
     </div>
   )
@@ -649,11 +730,11 @@ const DetailItem = ({ label, value, status, statusMap, getStatusColor }: { label
   </div>
 );
 
-// Komponen Pembantu untuk File Section - Diperbarui untuk isRevised
+// Komponen Pembantu untuk File Section
 const FileSection = ({ title, isLoading, files, emptyMessage, icon: Icon, iconColor, bgColor = 'bg-gray-50', borderColor = 'border-gray-100', downloadText = 'Download' }: {
   title: string;
   isLoading: boolean;
-  files: { name: string; url: string | null; isRevised?: boolean }[]; // Menambahkan isRevised opsional
+  files: { name: string; url: string | null; isRevised?: boolean }[];
   emptyMessage: string;
   icon: any;
   iconColor: string;
@@ -675,7 +756,6 @@ const FileSection = ({ title, isLoading, files, emptyMessage, icon: Icon, iconCo
               <div className="flex items-center gap-3 truncate">
                 <Icon className={`w-4 h-4 ${iconColor} flex-shrink-0`} />
                 <span className="truncate text-gray-700 font-medium">{file.name}</span>
-                {/* LOGIKA BARU: Tampilkan badge REVISI */}
                 {file.isRevised && (
                   <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200 flex-shrink-0">
                     REVISI

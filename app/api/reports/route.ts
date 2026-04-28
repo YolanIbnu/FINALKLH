@@ -49,11 +49,12 @@ export async function POST(request: NextRequest) {
       status: status,
       priority: priority,
       created_by: user.id,
-      current_holder: user.id,
+      current_holder: user.id, // Pembuat memegang laporan pertama kali
     }).select().single()
 
     if (reportError) return NextResponse.json({ error: reportError.message }, { status: 500 })
 
+    // Simpan Lampiran Awal (Jika Ada)
     if (originalFiles && originalFiles.length > 0) {
       const fileAttachments = originalFiles.map((file: any) => ({
         report_id: report.id,
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Catat History
     await supabase.from("workflow_history").insert({
       report_id: report.id,
       action: "Laporan dibuat",
@@ -87,8 +89,18 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    // 🔑 Tambahkan coordinatorId di sini untuk ditangkap dari body
-    const { id, action, notes, currentUser, originalFiles, coordinatorId, ...reportData } = body;
+    
+    // Ambil data dari Frontend
+    const { 
+      id, 
+      action, 
+      notes, 
+      currentUser, 
+      originalFiles, 
+      coordinatorId, 
+      coordinatorIds, // <--- Data Array ID dari Frontend
+      ...reportData 
+    } = body;
 
     if (!id) return NextResponse.json({ error: "ID Laporan diperlukan" }, { status: 400 });
 
@@ -98,7 +110,7 @@ export async function PUT(request: NextRequest) {
 
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // 1. UPDATE LAPORAN
+    // 1. UPDATE TABEL UTAMA (REPORTS)
     const updatePayload: any = {
       updated_at: new Date().toISOString(),
       no_surat: reportData.noSurat,
@@ -114,21 +126,53 @@ export async function PUT(request: NextRequest) {
       agenda_sestama: reportData.agendaSestama,
       sifat: reportData.sifat,
       derajat: reportData.derajat,
-      // 🔑 Masukkan coordinator_id ke dalam database jika dikirim dari frontend
-      ...(coordinatorId && { coordinator_id: coordinatorId }),
       ...(reportData.status && { status: reportData.status }),
     };
 
-    // Bersihkan payload dari nilai undefined agar tidak error
+    // Bersihkan data kosong
     Object.keys(updatePayload).forEach(key => updatePayload[key] === undefined && delete updatePayload[key]);
 
-    const { data, error } = await supabase.from("reports").update(updatePayload).eq("id", id).select().single();
+    const { data: report, error } = await supabase.from("reports").update(updatePayload).eq("id", id).select().single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // 2. UPDATE FILE LAMPIRAN
+    // 2. SIMPAN KE TABEL BARU (DISPOSISI)
+    // Normalisasi: pastikan jadi array (prioritas coordinatorIds)
+    const targets = Array.isArray(coordinatorIds) ? coordinatorIds : (coordinatorId ? [coordinatorId] : []);
+
+    // Hanya jalankan jika action adalah "Diteruskan ke Koordinator" dan ada targetnya
+    if (targets.length > 0 && action === "Diteruskan ke Koordinator") {
+       
+       // A. Hapus disposisi lama untuk surat ini (Reset) agar tidak duplikat
+       // Gunakan tabel 'disposisi' sesuai SQL yang kamu buat
+       await supabase.from('disposisi').delete().eq('report_id', id);
+
+       // B. Siapkan data insert
+       const disposisiData = targets.map((cid: string) => ({
+         report_id: id,
+         target_user_id: cid,  // <--- Sesuai SQL kamu
+         sender_id: user.id,   // <--- Sesuai SQL kamu (TU yang login)
+         status: 'pending',
+         notes: notes || '',
+         created_at: new Date().toISOString()
+       }));
+
+       // C. Insert Masal ke tabel 'disposisi'
+       const { error: dispError } = await supabase.from('disposisi').insert(disposisiData);
+       
+       if (dispError) {
+         console.error("Gagal menyimpan disposisi:", dispError.message);
+         // Kita log error tapi biarkan return success agar UI tidak freeze
+         // Opsional: throw error jika ini proses kritis
+       } else {
+         console.log(`Berhasil insert ${disposisiData.length} baris ke tabel disposisi`);
+       }
+    }
+
+    // 3. UPDATE FILE LAMPIRAN
     if (originalFiles) {
       await supabase.from("file_attachments").delete().eq("report_id", id);
+      
       if (originalFiles.length > 0) {
         const filesToInsert = originalFiles.map((file: any) => {
           const name = file.fileName || file.file_name || file.name || "Lampiran";
@@ -152,18 +196,19 @@ export async function PUT(request: NextRequest) {
       }
     }
 
-    // 3. HISTORY
+    // 4. HISTORY & LOGGING
     if (action) {
+      // Catat history
       await supabase.from("workflow_history").insert({
         report_id: id,
         action: action,
         user_id: user.id,
-        status: updatePayload.status || data.status,
-        notes: notes || ""
+        status: updatePayload.status || report.status,
+        notes: notes ? `${notes} (Dikirim ke ${targets.length} koordinator)` : `Dikirim ke ${targets.length} koordinator`
       });
     }
 
-    return NextResponse.json({ success: true, report: data, message: "Berhasil update" });
+    return NextResponse.json({ success: true, report, message: "Berhasil update laporan" });
   } catch (error: any) {
     console.error("PUT Error:", error);
     return NextResponse.json({ error: error.message || "Server Error" }, { status: 500 });
@@ -175,8 +220,19 @@ export async function GET(request: NextRequest) {
   try {
     const cookieStore = await cookies()
     const supabase = createServerClient(cookieStore)
-    const { data: reports, error } = await supabase.from("reports").select(`*, file_attachments (*), letter_tracking (*), profiles!reports_created_by_fkey (name, role)`).order("created_at", { ascending: false })
+    
+    const { data: reports, error } = await supabase
+      .from("reports")
+      .select(`
+        *, 
+        file_attachments (*), 
+        letter_tracking (*), 
+        profiles!reports_created_by_fkey (name, role)
+      `)
+      .order("created_at", { ascending: false })
+
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    
     return NextResponse.json({ reports })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })

@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { useApp } from "../../context/AppContext"
-import { supabase } from "../../../lib/supabaseClient"
 import { toast } from "../../../lib/toast"
 import { X, AlertTriangle } from "lucide-react"
 
@@ -30,37 +29,30 @@ export function RevisionModal({ report, profiles, onClose }) {
     setIsSubmitting(true)
 
     try {
-      // Langkah 1: Update tugas spesifik menjadi 'revision-required'. Ini satu-satunya update status.
-      await supabase
-        .from('task_assignments')
-        .update({ 
-          status: "revision-required", 
-          revision_notes: revisionNotes.trim(), 
-          completed_tasks: [] // Reset to-do list staff
-        })
-        .eq('id', selectedAssignmentId)
+      // Gunakan API endpoint server-side yang bypass RLS
+      // agar SEMUA koordinator bisa mengirim revisi (bukan hanya pembuat tugas)
+      const response = await fetch("/api/revision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignmentId: selectedAssignmentId,
+          reportId: report.id,
+          revisionNotes: revisionNotes.trim(),
+        }),
+      })
 
-      // ✅ Perubahan Utama: Blok kode untuk update tabel 'reports' sudah dihapus dari sini.
+      const result = await response.json()
 
-      // Langkah 2: Catat di riwayat (tetap dilakukan untuk pelacakan)
-      const selectedAssignment = report.task_assignments.find(a => a.id.toString() === selectedAssignmentId);
-      const staffName = getStaffName(selectedAssignment?.staff_id);
+      if (!response.ok) {
+        throw new Error(result.error || "Gagal mengirim revisi.")
+      }
 
-      await supabase
-        .from('workflow_history')
-        .insert({
-          report_id: report.id,
-          action: 'Permintaan Revisi',
-          user_id: currentUser?.id,
-          status: 'revision-required', // Status di riwayat tetap untuk pelacakan
-          notes: `Revisi diminta untuk staff: ${staffName}. Catatan: ${revisionNotes.trim()}`,
-        })
-
-      toast.warning(`Permintaan revisi dikirim!`)
+      toast.warning(`Permintaan revisi dikirim ke ${result.staffName || 'Staff'}!`)
       onClose()
 
     } catch (error) {
-      toast.error(error.message)
+      console.error("Error submitting revision:", error)
+      toast.error(error.message || "Gagal mengirim revisi.")
     } finally {
       setIsSubmitting(false)
     }

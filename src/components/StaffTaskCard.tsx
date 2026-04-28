@@ -1,6 +1,6 @@
 // StaffTaskCard.tsx
 
-import { TaskAssignment } from './StaffDashboard'; // Asumsi TaskAssignment diimpor
+import { TaskAssignment } from './dashboards/StaffDashboard'; // Import tipe dari StaffDashboard
 
 interface StaffTaskCardProps {
   task: TaskAssignment;

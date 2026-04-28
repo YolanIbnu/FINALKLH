@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useApp } from "../../context/AppContext"
 import { supabase } from "../../../lib/supabaseClient"
 import { toast } from "../../../lib/toast";
@@ -9,18 +9,16 @@ import {
   CheckCircle, Search, Eye, LogOut, Send, XCircle, Calendar,
   Check, X, Download, ChevronLeft, ChevronRight, Loader2
 } from "lucide-react"
-// Pastikan SUB_SERVICES_MAP dan SERVICES diimport dari types
 import { Report, SERVICES, SUB_SERVICES_MAP } from "../../types"
 import { ReportDetailsModal } from "../modals/ReportDetailsModal"
 import { AddStaffModal } from "../modals/AddStaffModal"
 import { RevisionModal } from "../modals/RevisionModal"
 
 // --- KONFIGURASI SPESIALISASI KOORDINATOR ---
-// Menentukan kategori utama berdasarkan nama akun yang login
 const COORDINATOR_SPECIALIZATION: Record<string, string> = {
   "Suwarti": "Administrasi Kepegawaian",
   "Ahmad Toto": "Pengelolaan Jabatan Fungsional",
-  "Achmad Evianto": "Pengelolaan Jabatan Fungsional", // Alternatif jika nama di DB berbeda
+  "Achmad Evianto": "Pengelolaan Jabatan Fungsional",
   "Yosi Yosandi": "Perencanaan dan pengembangan SDM",
   "Adi Sulaksono": "Organisasi dan Tata Laksana",
 };
@@ -237,7 +235,6 @@ function ReviewTaskModal({ report, profiles, onClose, onApprove, onReject }: {
 
   const [isApproving, setIsApproving] = useState(false);
 
-  // LOGIC FILTER: Tampilkan tugas yang 'completed' (kerjaan biasa) ATAU 'pending-review' (revisi yang sudah disetujui)
   const tasksToReview = report.task_assignments.filter(
     task => task.status === 'completed' || task.status === 'pending-review'
   );
@@ -277,7 +274,6 @@ function ReviewTaskModal({ report, profiles, onClose, onApprove, onReject }: {
                 const isRevision = !!task.revised_file_path;
                 const displayFilePath = isRevision ? task.revised_file_path : task.file_path;
                 const displayNotes = isRevision ? task.staff_revision_notes : task.Staff_notes;
-                // Jika isRevision, pakai bucket revisi, jika tidak, pakai documents
                 const bucketName = isRevision ? "revised_documents" : "documents";
 
                 return (
@@ -382,24 +378,34 @@ export function CoordinatorDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const reportsPerPage = 20;
 
-  const fetchData = async (showLoadingSpinner = false) => {
+  // --- FETCH DATA ---
+  const fetchData = useCallback(async (showLoadingSpinner = false) => {
     if (!currentUser?.id) return;
     if (showLoadingSpinner) setLoading(true);
 
     try {
+      // 1. AMBIL ID DARI TABEL DISPOSISI
+      const { data: dispoData, error: dispoError } = await supabase
+        .from('disposisi')
+        .select('report_id')
+        .eq('target_user_id', currentUser.id);
+
+      if (dispoError) throw dispoError;
+
+      const reportIds = dispoData.map((d: any) => d.report_id);
+
+      if (reportIds.length === 0) {
+        setLocalReports([]);
+        setLoading(false);
+        return;
+      }
+
+      // 2. AMBIL DETAIL LAPORAN
       const { data: reportsData, error: reportsError } = await supabase
         .from('reports')
         .select('*, task_assignments(*)')
-        // 🔑 PERBAIKAN UTAMA DI SINI:
-        // 1. Tambahkan .eq('coordinator_id', currentUser.id) untuk memfilter laporan berdasarkan penerima.
-        // 2. Gabungkan filter ini dengan .or() lainnya menggunakan klausa filter yang lebih kompleks jika diperlukan, atau
-        // 3. (Cara Sederhana) Pastikan semua laporan yang masuk ke dashboard koordinator HANYA yang ditujukan kepadanya.
-        .eq('coordinator_id', currentUser.id) // <--- TAMBAHKAN FILTER INI
-        .or(`status.eq.forwarded-to-coordinator,current_holder.eq.${currentUser.id},status.eq.in-progress,status.eq.revision-required,status.eq.pending-approval-koordinator`)
+        .in('id', reportIds)
         .order('created_at', { ascending: false });
-      // Catatan: Jika Anda menggunakan `and` secara implisit (seperti di atas), filter akan menjadi:
-      // (coordinator_id = currentUser.id) AND (status = 'forwarded-to-coordinator' OR status = 'in-progress' OR ...)
-      // Ini adalah cara yang benar untuk memastikan koordinator hanya melihat laporannya.
 
       if (reportsError) throw reportsError;
 
@@ -412,37 +418,32 @@ export function CoordinatorDashboard() {
       }
     } catch (error) {
       console.error("Gagal mengambil data:", error);
+      toast.error("Gagal memuat data laporan.");
     } finally {
       if (showLoadingSpinner) setLoading(false);
     }
-  };
+  }, [currentUser, localProfiles.length]);
 
   const handleQuickForwardToTU = async (report: LocalReport) => {
     if (!report || !currentUser) return;
-
-    if (!window.confirm(`Anda yakin ingin meneruskan laporan "${report.hal}" ke TU?`)) {
-      return;
-    }
+    if (!window.confirm(`Anda yakin ingin meneruskan laporan "${report.hal}" ke TU?`)) return;
 
     setForwardingId((report as any).id);
     try {
-      const { error: updateError } = await supabase
-        .from('reports')
-        .update({ status: 'pending-approval-tu', current_holder: null })
-        .eq('id', (report as any).id);
-      if (updateError) throw updateError;
-
-      await supabase.from('workflow_history').insert({
-        report_id: (report as any).id,
-        action: 'Laporan disetujui dan diteruskan ke TU via Aksi Cepat',
-        user_id: currentUser?.id,
-        status: 'pending-approval-tu',
-        notes: `Laporan disetujui oleh Koordinator dari dashboard.`,
+      const response = await fetch('/api/coordinator-action', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'approve-and-forward',
+          reportId: (report as any).id,
+        }),
       });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Gagal meneruskan laporan.');
 
       toast.success("Laporan berhasil diteruskan ke TU!");
       fetchData(false);
-
     } catch (error: any) {
       toast.error("Gagal meneruskan laporan: " + error.message);
     } finally {
@@ -461,25 +462,23 @@ export function CoordinatorDashboard() {
         return;
       }
 
-      const { error: updateTaskError } = await supabase
-        .from('task_assignments')
-        .update({ status: 'pending-review' })
-        .in('id', tasksToApprove);
-
-      if (updateTaskError) throw updateTaskError;
-
-      await supabase.from('workflow_history').insert({
-        report_id: report.id,
-        action: 'Revisi Disetujui (Menunggu Review Akhir)',
-        user_id: currentUser?.id,
-        status: 'pending-review',
-        notes: `Koordinator menyetujui revisi. Laporan masuk ke tahap review akhir sebelum ke TU.`,
+      const response = await fetch('/api/coordinator-action', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'approve-revisions',
+          reportId: report.id,
+          taskIds: tasksToApprove,
+          notes: `Koordinator menyetujui revisi. Laporan masuk ke tahap review akhir sebelum ke TU.`,
+        }),
       });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Gagal menyetujui revisi.');
 
       toast.success("Revisi disetujui! Laporan masuk ke tahap Review Akhir.");
       setReviewRevisionReport(null);
       fetchData();
-
     } catch (error: any) {
       toast.error("Gagal menyetujui revisi: " + error.message);
     }
@@ -494,24 +493,22 @@ export function CoordinatorDashboard() {
     if (!report || !currentUser) return;
 
     try {
-      const { error: updateError } = await supabase
-        .from('reports')
-        .update({ status: 'pending-approval-tu', current_holder: null })
-        .eq('id', report.id);
-      if (updateError) throw updateError;
-
-      await supabase.from('workflow_history').insert({
-        report_id: report.id,
-        action: 'Pekerjaan Staff Disetujui & Diteruskan ke TU',
-        user_id: currentUser?.id,
-        status: 'pending-approval-tu',
-        notes: `Koordinator menyetujui hasil kerja staff (termasuk revisi jika ada) dan meneruskan ke TU.`,
+      const response = await fetch('/api/coordinator-action', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'approve-and-forward',
+          reportId: report.id,
+          notes: `Koordinator menyetujui hasil kerja staff (termasuk revisi jika ada) dan meneruskan ke TU.`,
+        }),
       });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Gagal memproses laporan.');
 
       toast.success("Laporan berhasil disetujui dan diteruskan ke TU!");
       setReviewTaskReport(null);
       fetchData(false);
-
     } catch (error: any) {
       toast.error("Gagal memproses laporan: " + error.message);
     }
@@ -534,7 +531,7 @@ export function CoordinatorDashboard() {
         clearInterval(timer);
       };
     }
-  }, [currentUser]);
+  }, [currentUser, fetchData]);
 
   const getProfileName = (profileId: string) => {
     if (!profileId || !localProfiles) return "Sistem";
@@ -597,6 +594,13 @@ export function CoordinatorDashboard() {
         report.no_surat?.toLowerCase().includes(searchQuery.toLowerCase());
       const displayStatusValue = getStatusInfo(report).value;
       const matchesStatus = !statusFilter || displayStatusValue === statusFilter;
+
+      // 🛑 FIX: Sembunyikan laporan yang sudah diteruskan ke TU atau Selesai
+      // Agar dashboard koordinator bersih, hanya menampilkan yang perlu dikerjakan.
+      if (report.status === 'pending-approval-tu' || report.status === 'completed') {
+        return false;
+      }
+
       return matchesService && matchesStatus && matchesSearch;
     });
   }, [localReports, serviceFilter, statusFilter, searchQuery]);
@@ -617,18 +621,19 @@ export function CoordinatorDashboard() {
 
   // --- LOGIC STATS ---
   const stats = useMemo(() => {
+    // Stats dihitung dari ALL localReports agar angka "Total" dan "Selesai" tetap terlihat secara global
+    // meskipun di tabel utama disembunyikan.
     return {
-      totalLaporan: allFilteredReports.length,
-      perluTindakan: allFilteredReports.filter(r => getStatusInfo(r).value === 'forwarded-to-coordinator').length,
-      selesai: allFilteredReports.filter(r => getStatusInfo(r).value === 'completed').length,
-      revisi: allFilteredReports.filter(r => getStatusInfo(r).value === 'revision-required').length,
-      menungguReview: allFilteredReports.filter(r =>
+      totalLaporan: localReports.length,
+      perluTindakan: localReports.filter(r => getStatusInfo(r).value === 'forwarded-to-coordinator').length,
+      selesai: localReports.filter(r => getStatusInfo(r).value === 'completed').length,
+      revisi: localReports.filter(r => getStatusInfo(r).value === 'revision-required').length,
+      menungguReview: localReports.filter(r =>
         getStatusInfo(r).value === 'pending-review-revisi' ||
         getStatusInfo(r).value === 'pending-review-baru'
       ).length,
     };
-  }, [allFilteredReports]);
-
+  }, [localReports]);
 
   const handleLogout = () => dispatch({ type: "LOGOUT" });
 
@@ -727,7 +732,6 @@ export function CoordinatorDashboard() {
                 <option value="">
                   {specializedCategory ? `Semua Layanan ${specializedCategory}` : "Semua Layanan"}
                 </option>
-                {/* Menampilkan Opsi berdasarkan Spesialisasi Koordinator */}
                 {serviceOptions.map(s => (
                   <option key={s} value={s}>{s}</option>
                 ))}
@@ -804,7 +808,6 @@ export function CoordinatorDashboard() {
                           {status.value !== 'pending-review-revisi' && status.value !== 'pending-review-baru' && (
                             <>
                               <button onClick={() => setSelectedReport(report)} className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors" title="Lihat Detail"><Eye className="w-5 h-5" /></button>
-                              {/* Tombol Atur Staff dihapus dari sini */}
                               <button onClick={() => setRevisionReport(report)} className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-md transition-colors" title="Kembalikan / Revisi"><AlertTriangle className="w-5 h-5" /></button>
                             </>
                           )}
@@ -812,7 +815,6 @@ export function CoordinatorDashboard() {
                           {/* TOMBOL REVIEW TUGAS REGULAR/AKHIR (Orange) */}
                           {status.value === 'pending-review-baru' && (
                             <div className="flex items-center gap-2">
-                              {/* 1. Tombol Atur Staff - DITAMBAHKAN DI SINI */}
                               <button
                                 onClick={() => setAddStaffReport(report)}
                                 className="p-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors"
@@ -829,7 +831,6 @@ export function CoordinatorDashboard() {
                                 <CheckCircle className="w-3.5 h-3.5" /> Review Akhir
                               </button>
 
-                              {/* SHORTCUT: Langsung Forward ke TU jika sudah clear */}
                               <button
                                 onClick={() => handleQuickForwardToTU(report)}
                                 disabled={forwardingId === (report as any).id}

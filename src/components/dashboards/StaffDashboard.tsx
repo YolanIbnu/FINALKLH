@@ -36,7 +36,7 @@ type Profile = {
   full_name: string;
 };
 
-type TaskAssignment = {
+export type TaskAssignment = {
   id: string;
   staff_id: string;
   coordinator_id: string; // <-- PERUBAHAN UTAMA: ID Koordinator yang menugaskan
@@ -508,7 +508,7 @@ export function StaffDashboard() {
       const { error: updateError } = await supabase
         .from("task_assignments")
         .update({
-          status: "pending-review",
+          status: "completed",
           progress: 100,
           revised_file_path: filePath,
           staff_revision_notes: staffNotes,
@@ -517,6 +517,13 @@ export function StaffDashboard() {
         .eq("id", selectedTask.id);
 
       if (updateError) throw updateError;
+
+      // Update status laporan kembali ke 'in-progress' agar 
+      // Coordinator Dashboard mendeteksi revisi masuk via task_assignments
+      await supabase
+        .from('reports')
+        .update({ status: 'in-progress' })
+        .eq('id', selectedTask.reports.id);
 
       await supabase
         .from('workflow_history')
