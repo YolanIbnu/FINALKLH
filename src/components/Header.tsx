@@ -77,10 +77,10 @@ export function Header({ userRole }: { userRole: string }) {
 
           <div className="hidden sm:block">
             <h1 className="text-xl font-bold text-gray-900">WORKFLOW SDMO - Alur Proses Administrasi</h1>
-            <p className="text-sm text-gray-600">Sistem Tracking Surat</p>
+            <p className="text-sm text-gray-600">Rekam Kinerja Biro SDMO KLH/BPLH</p>
           </div>
           <div className="sm:hidden">
-            <h1 className="text-lg font-bold text-gray-900">WORKFLOW SDMO</h1>
+            <h1 className="text-lg font-bold text-gray-900">Rekam Kinerja SDMO</h1>
           </div>
         </div>
 

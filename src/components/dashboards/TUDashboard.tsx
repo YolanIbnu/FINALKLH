@@ -5,6 +5,7 @@ import { useApp } from "../../context/AppContext"
 import { SERVICES, SUB_SERVICES_MAP, Report } from "../../types"
 import { supabase } from "@/lib/supabaseClient.js"
 import { toast } from "../../../lib/toast";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import {
   FileText,
   Plus,
@@ -27,13 +28,72 @@ import {
   ChevronLeft,
   ChevronRight,
   Layers,
-  Undo2
+  Undo2,
+  PieChart as PieChartIcon,
+  BarChart3,
+  Users
 } from "lucide-react"
 import { ReportForm } from "../forms/ReportForm"
 import { ForwardForm } from "../forms/ForwardForm"
 
 // Jumlah item per halaman
 const ITEMS_PER_PAGE = 25;
+
+// Warna untuk donut chart koordinator
+const DONUT_COLORS = [
+  '#3B82F6', // blue
+  '#F97316', // orange
+  '#6366F1', // indigo
+  '#EAB308', // yellow
+  '#06B6D4', // cyan
+  '#EC4899', // pink
+  '#10B981', // emerald
+  '#8B5CF6', // violet
+];
+
+// Helper: tentukan triwulan dari bulan
+function getTriwulan(month: number): number {
+  if (month >= 1 && month <= 3) return 1;
+  if (month >= 4 && month <= 6) return 2;
+  if (month >= 7 && month <= 9) return 3;
+  return 4;
+}
+
+// Helper: dapatkan range tanggal triwulan
+function getTriwulanDateRange(triwulan: number, year: number): { start: string; end: string } {
+  const ranges: Record<number, { start: string; end: string }> = {
+    1: { start: `${year}-01-01`, end: `${year}-03-31` },
+    2: { start: `${year}-04-01`, end: `${year}-06-30` },
+    3: { start: `${year}-07-01`, end: `${year}-09-30` },
+    4: { start: `${year}-10-01`, end: `${year}-12-31` },
+  };
+  return ranges[triwulan];
+}
+
+// Tipe data chart koordinator
+type CoordinatorChartData = {
+  name: string;
+  value: number;
+  percentage: number;
+};
+
+// Tipe data detail per koordinator
+type CoordinatorDetail = {
+  id: string;
+  name: string;
+  initial: string;
+  color: string;
+  totalLaporan: number;
+  perluTindakan: number;
+  menungguReview: number;
+  sedangRevisi: number;
+  selesai: number;
+};
+
+// Warna avatar koordinator
+const COORD_AVATAR_COLORS = [
+  'bg-emerald-500', 'bg-pink-500', 'bg-blue-500', 'bg-amber-500', 'bg-purple-500', 'bg-cyan-500'
+];
 
 // Ubah definisi state untuk staffTasks agar menyertakan 'isRevised'
 export type StaffTask = {
@@ -46,6 +106,9 @@ export type StaffTask = {
 export function TUDashboard() {
   const { state, dispatch } = useApp()
   const { reports, users: profiles, currentUser } = state
+
+  // State untuk Tab Navigation
+  const [activeTab, setActiveTab] = useState<'laporan' | 'statistik'>('laporan')
 
   // State untuk Modals/Forms
   const [showReportForm, setShowReportForm] = useState(false)
@@ -71,6 +134,15 @@ export function TUDashboard() {
 
   // State Paginasi
   const [currentPage, setCurrentPage] = useState(1);
+
+  // State untuk Triwulan Chart
+  const [selectedTriwulan, setSelectedTriwulan] = useState(() => getTriwulan(new Date().getMonth() + 1));
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+  const [triwulanData, setTriwulanData] = useState<CoordinatorChartData[]>([]);
+  const [triwulanTotalReports, setTriwulanTotalReports] = useState(0);
+  const [multiCoordinatorCount, setMultiCoordinatorCount] = useState(0);
+  const [isLoadingChart, setIsLoadingChart] = useState(false);
+  const [coordinatorDetails, setCoordinatorDetails] = useState<CoordinatorDetail[]>([]);
 
   const statusMap: { [key: string]: string } = {
     'draft': 'Draft',
@@ -395,6 +467,131 @@ export function TUDashboard() {
     { label: "Selesai", value: reports.filter((r) => r.status === "completed").length, icon: CheckCircle, color: "text-green-600", bg: "bg-green-100" },
   ];
 
+  // --- FETCH DATA TRIWULAN CHART ---
+  useEffect(() => {
+    const fetchTriwulanData = async () => {
+      setIsLoadingChart(true);
+      try {
+        const { start, end } = getTriwulanDateRange(selectedTriwulan, selectedYear);
+
+        // 1. Ambil laporan di range triwulan ini berdasarkan tanggal_agenda
+        const { data: reportsInRange, error: reportsErr } = await supabase
+          .from('reports')
+          .select('id, tanggal_agenda, status')
+          .not('tanggal_agenda', 'is', null)
+          .gte('tanggal_agenda', start)
+          .lte('tanggal_agenda', end + 'T23:59:59');
+
+        if (reportsErr) throw reportsErr;
+        if (!reportsInRange || reportsInRange.length === 0) {
+          setTriwulanData([]);
+          setTriwulanTotalReports(0);
+          setMultiCoordinatorCount(0);
+          setCoordinatorDetails([]);
+          setIsLoadingChart(false);
+          return;
+        }
+
+        const reportIds = new Set(reportsInRange.map(r => r.id));
+        const reportStatusMap: Record<string, string> = {};
+        reportsInRange.forEach(r => { reportStatusMap[r.id] = r.status; });
+        setTriwulanTotalReports(reportsInRange.length);
+
+        // 2. Ambil SEMUA disposisi (tanpa .in() yang bisa Bad Request)
+        const { data: allDispoData, error: dispoErr } = await supabase
+          .from('disposisi')
+          .select('report_id, target_user_id');
+
+        if (dispoErr) throw dispoErr;
+
+        // Filter disposisi hanya untuk laporan di triwulan ini
+        const dispoData = (allDispoData || []).filter((d: any) => reportIds.has(d.report_id));
+
+        // 3. Ambil profil koordinator
+        const { data: coordProfiles, error: coordErr } = await supabase
+          .from('profiles')
+          .select('id, full_name, name, role')
+          .eq('role', 'Koordinator');
+
+        if (coordErr) throw coordErr;
+
+        // 4. Hitung laporan yang dikirim ke lebih dari 1 koordinator
+        const reportCoordMap: Record<string, Set<string>> = {};
+        dispoData.forEach((d: any) => {
+          if (!reportCoordMap[d.report_id]) reportCoordMap[d.report_id] = new Set();
+          reportCoordMap[d.report_id].add(d.target_user_id);
+        });
+        const multiCount = Object.values(reportCoordMap).filter(s => s.size > 1).length;
+        setMultiCoordinatorCount(multiCount);
+
+        // 5. Hitung jumlah laporan per koordinator
+        const coordCount: Record<string, number> = {};
+        dispoData.forEach((d: any) => {
+          coordCount[d.target_user_id] = (coordCount[d.target_user_id] || 0) + 1;
+        });
+
+        // Tambahkan TU (laporan tanpa disposisi = milik TU)
+        const reportsWithDispo = new Set(dispoData.map((d: any) => d.report_id));
+        let tuCount = 0;
+        reportIds.forEach(id => {
+          if (!reportsWithDispo.has(id)) tuCount++;
+        });
+
+        // Tambahkan hanya koordinator (tanpa TU)
+        const totalDispoCount = Object.values(coordCount).reduce((a, b) => a + b, 0);
+        const chartData: CoordinatorChartData[] = [];
+
+        Object.entries(coordCount)
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([userId, count]) => {
+            const profile = (coordProfiles || []).find((p: any) => p.id === userId);
+            const name = profile?.full_name || profile?.name || 'Koordinator';
+            chartData.push({
+              name,
+              value: count,
+              percentage: totalDispoCount > 0 ? Math.round((count / totalDispoCount) * 100) : 0,
+            });
+          });
+
+        setTriwulanData(chartData);
+
+        // 7. Build detail per koordinator (seperti di foto)
+        // Kelompokkan report_id per koordinator
+        const coordReportIds: Record<string, Set<string>> = {};
+        dispoData.forEach((d: any) => {
+          if (!coordReportIds[d.target_user_id]) coordReportIds[d.target_user_id] = new Set();
+          coordReportIds[d.target_user_id].add(d.report_id);
+        });
+
+        const details: CoordinatorDetail[] = (coordProfiles || []).map((profile: any, idx: number) => {
+          const myReportIds = coordReportIds[profile.id] || new Set<string>();
+          const myReports = Array.from(myReportIds).map(rid => reportStatusMap[rid]).filter(Boolean);
+
+          return {
+            id: profile.id,
+            name: profile.full_name || profile.name || 'Koordinator',
+            initial: (profile.full_name || profile.name || 'K').charAt(0).toUpperCase(),
+            color: COORD_AVATAR_COLORS[idx % COORD_AVATAR_COLORS.length],
+            totalLaporan: myReports.length,
+            perluTindakan: myReports.filter(s => s === 'forwarded-to-coordinator').length,
+            menungguReview: myReports.filter(s => s === 'pending-approval-tu' || s === 'pending-approval-koordinator').length,
+            sedangRevisi: myReports.filter(s => s === 'revision-required' || s === 'returned').length,
+            selesai: myReports.filter(s => s === 'completed').length,
+          };
+        });
+
+        setCoordinatorDetails(details.filter(d => d.totalLaporan > 0 || true)); // show all coordinators
+      } catch (err) {
+        console.error('Error fetching triwulan data:', err);
+        toast.error('Gagal memuat data triwulan.');
+      } finally {
+        setIsLoadingChart(false);
+      }
+    };
+
+    fetchTriwulanData();
+  }, [selectedTriwulan, selectedYear]);
+
   return (
     <div className="space-y-8 p-4 md:p-8 bg-gray-50 min-h-screen">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -404,13 +601,15 @@ export function TUDashboard() {
             {currentTime.toLocaleDateString("id-ID", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} | {currentTime.toLocaleTimeString("id-ID")}
           </p>
         </div>
-        <button
-          onClick={() => { setShowReportForm(true); setEditingReport(null); }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md hover:shadow-lg font-semibold text-sm"
-        >
-          <Plus className="w-5 h-5" />
-          Buat Laporan Baru
-        </button>
+        {activeTab === 'laporan' && (
+          <button
+            onClick={() => { setShowReportForm(true); setEditingReport(null); }}
+            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md hover:shadow-lg font-semibold text-sm"
+          >
+            <Plus className="w-5 h-5" />
+            Buat Laporan Baru
+          </button>
+        )}
       </div>
 
       {/* Statistik Cards */}
@@ -430,7 +629,278 @@ export function TUDashboard() {
         ))}
       </div>
 
-      <hr className="border-gray-200" />
+      {/* === TAB NAVIGATION === */}
+      <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-1.5 flex gap-1">
+        <button
+          onClick={() => setActiveTab('laporan')}
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+            activeTab === 'laporan'
+              ? 'bg-blue-600 text-white shadow-lg'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          Daftar Laporan Masuk
+        </button>
+        <button
+          onClick={() => setActiveTab('statistik')}
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
+            activeTab === 'statistik'
+              ? 'bg-indigo-600 text-white shadow-lg'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+          }`}
+        >
+          <PieChartIcon className="w-4 h-4" />
+          Statistik Koordinator
+        </button>
+      </div>
+
+      {/* === TAB CONTENT: STATISTIK KOORDINATOR === */}
+      {activeTab === 'statistik' && (
+        <div className="space-y-8">
+      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+        <div className="p-6 border-b border-gray-100">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-100 rounded-xl shadow-md">
+                <PieChartIcon className="w-6 h-6 text-indigo-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Distribusi Laporan per Koordinator</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Statistik berdasarkan triwulan dan tahun</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedTriwulan}
+                onChange={(e) => setSelectedTriwulan(Number(e.target.value))}
+                className="border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-sm font-medium"
+              >
+                <option value={1}>Triwulan 1 (Jan-Mar)</option>
+                <option value={2}>Triwulan 2 (Apr-Jun)</option>
+                <option value={3}>Triwulan 3 (Jul-Sep)</option>
+                <option value={4}>Triwulan 4 (Okt-Des)</option>
+              </select>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-sm font-medium"
+              >
+                {[2024, 2025, 2026, 2027].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6">
+          {isLoadingChart ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+              <span className="ml-3 text-gray-500 font-medium">Memuat data triwulan...</span>
+            </div>
+          ) : triwulanData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+              <BarChart3 className="w-14 h-14 mb-4 text-gray-300" />
+              <p className="text-lg font-medium text-gray-500">Tidak Ada Data</p>
+              <p className="text-sm text-gray-400 mt-1">Belum ada laporan di Triwulan {selectedTriwulan} Tahun {selectedYear}</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+              {/* Donut Chart */}
+              <div className="relative">
+                <ResponsiveContainer width="100%" height={350}>
+                  <PieChart>
+                    <Pie
+                      data={triwulanData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={140}
+                      paddingAngle={3}
+                      dataKey="value"
+                      stroke="#fff"
+                      strokeWidth={3}
+                      label={({ percentage }) => `${percentage}%`}
+                    >
+                      {triwulanData.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: number, name: string) => [`${value} Laporan`, name]}
+                      contentStyle={{
+                        borderRadius: '12px',
+                        border: '1px solid #e5e7eb',
+                        boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                        padding: '10px 16px',
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                {/* Center Label */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-sm text-gray-500 font-medium">Triwulan {selectedTriwulan}</span>
+                  <span className="text-lg font-extrabold text-gray-900 uppercase tracking-wide">BIRO SDMO</span>
+                </div>
+              </div>
+
+              {/* Legend + Summary */}
+              <div className="space-y-5">
+                {/* Summary Cards */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Layers className="w-4 h-4 text-blue-600" />
+                      <span className="text-xs font-semibold text-blue-600 uppercase">Total Laporan</span>
+                    </div>
+                    <p className="text-3xl font-extrabold text-gray-900">{triwulanTotalReports}</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-4 border border-orange-100">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Users className="w-4 h-4 text-orange-600" />
+                      <span className="text-xs font-semibold text-orange-600 uppercase">Multi Koordinator</span>
+                    </div>
+                    <p className="text-3xl font-extrabold text-gray-900">{multiCoordinatorCount}</p>
+                    <p className="text-xs text-gray-500 mt-1">ditujukan ke &gt;1 koordinator</p>
+                  </div>
+                </div>
+
+                {/* Coordinator Breakdown */}
+                <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
+                  <h4 className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-indigo-500" /> Rincian per Koordinator
+                  </h4>
+                  <div className="space-y-3">
+                    {triwulanData.map((item, index) => (
+                      <div key={item.name} className="flex items-center justify-between group">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-4 h-4 rounded-full shadow-sm flex-shrink-0"
+                            style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }}
+                          />
+                          <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900 transition-colors">{item.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-bold text-gray-900">{item.value}</span>
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600 min-w-[48px] text-center">
+                            {item.percentage}%
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {multiCoordinatorCount > 0 && (
+                  <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                    <p className="text-sm text-amber-800 font-medium">
+                      <span className="font-bold">{multiCoordinatorCount} dari {triwulanTotalReports}</span> laporan ditujukan kepada lebih dari 1 koordinator
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* === DETAIL DASHBOARD PER KOORDINATOR === */}
+      {coordinatorDetails.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-100 rounded-xl shadow-sm">
+              <Users className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Dashboard per Koordinator</h2>
+              <p className="text-sm text-gray-500">Detail statistik laporan masing-masing koordinator di Triwulan {selectedTriwulan} Tahun {selectedYear}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {coordinatorDetails.map((coord) => (
+              <div key={coord.id} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden hover:shadow-xl transition-shadow">
+                {/* Header Koordinator */}
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800">Dashboard Koordinator</h3>
+                    <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      Triwulan {selectedTriwulan}, {selectedYear}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      <p className="text-xs font-semibold text-gray-700">{coord.name}</p>
+                      <p className="text-[10px] text-green-600 font-medium flex items-center justify-end gap-1">
+                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span> Online
+                      </p>
+                    </div>
+                    <div className={`w-9 h-9 ${coord.color} rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md`}>
+                      {coord.initial}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats Grid */}
+                <div className="p-4 grid grid-cols-3 gap-2">
+                  {/* Total Laporan */}
+                  <div className="bg-blue-50 rounded-xl p-3 text-center border border-blue-100">
+                    <div className="mx-auto w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center mb-2">
+                      <FileText className="w-3.5 h-3.5 text-blue-600" />
+                    </div>
+                    <p className="text-xl font-extrabold text-gray-900">{coord.totalLaporan}</p>
+                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Total Laporan</p>
+                  </div>
+
+                  {/* Perlu Tindakan */}
+                  <div className="bg-purple-50 rounded-xl p-3 text-center border border-purple-100">
+                    <div className="mx-auto w-7 h-7 bg-purple-100 rounded-lg flex items-center justify-center mb-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-purple-600" />
+                    </div>
+                    <p className="text-xl font-extrabold text-gray-900">{coord.perluTindakan}</p>
+                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Perlu Tindakan</p>
+                  </div>
+
+                  {/* Menunggu Review */}
+                  <div className="bg-cyan-50 rounded-xl p-3 text-center border border-cyan-100">
+                    <div className="mx-auto w-7 h-7 bg-cyan-100 rounded-lg flex items-center justify-center mb-2">
+                      <Eye className="w-3.5 h-3.5 text-cyan-600" />
+                    </div>
+                    <p className="text-xl font-extrabold text-gray-900">{coord.menungguReview}</p>
+                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Menunggu Review</p>
+                  </div>
+
+                  {/* Sedang Revisi */}
+                  <div className="bg-red-50 rounded-xl p-3 text-center border border-red-100 col-span-1">
+                    <div className="mx-auto w-7 h-7 bg-red-100 rounded-lg flex items-center justify-center mb-2">
+                      <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                    </div>
+                    <p className="text-xl font-extrabold text-gray-900">{coord.sedangRevisi}</p>
+                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Sedang Revisi</p>
+                  </div>
+
+                  {/* Selesai */}
+                  <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100 col-span-2">
+                    <div className="mx-auto w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center mb-2">
+                      <CheckCircle className="w-3.5 h-3.5 text-green-600" />
+                    </div>
+                    <p className="text-xl font-extrabold text-gray-900">{coord.selesai}</p>
+                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Selesai</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+        </div>
+      )}
+
+      {/* === TAB CONTENT: DAFTAR LAPORAN === */}
+      {activeTab === 'laporan' && (
+        <div className="space-y-6">
 
       {/* Tabel Laporan */}
       <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
@@ -610,6 +1080,8 @@ export function TUDashboard() {
           </div>
         )}
       </div>
+        </div>
+      )}
 
       {/* View Detail Modal (Improved) */}
       {viewingReport && (
