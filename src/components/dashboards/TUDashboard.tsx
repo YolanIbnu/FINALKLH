@@ -120,6 +120,7 @@ export function TUDashboard() {
   // State untuk Filter & Search
   const [searchQuery, setSearchQuery] = useState("")
   const [serviceFilter, setServiceFilter] = useState("")
+  const [statusFilter, setStatusFilter] = useState("")
 
   // State UI
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null)
@@ -427,11 +428,13 @@ export function TUDashboard() {
           (report.layanan === serviceFilter || report.sub_layanan === serviceFilter)
           : true;
 
-        return matchesSearch && matchesService;
+        const matchesStatus = statusFilter ? report.status === statusFilter : true;
+
+        return matchesSearch && matchesService && matchesStatus;
       })
       // Urutkan dari yang TERLAMA ke TERBARU (ASC)
       .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-  }, [reports, searchQuery, serviceFilter]);
+  }, [reports, searchQuery, serviceFilter, statusFilter]);
 
   // Logika Paginasi
   const totalPages = Math.ceil(filteredReports.length / ITEMS_PER_PAGE);
@@ -447,7 +450,7 @@ export function TUDashboard() {
   // Reset halaman ke 1 saat filter/search berubah
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, serviceFilter]);
+  }, [searchQuery, serviceFilter, statusFilter]);
 
   // --- LOGIKA PINDAH KE HALAMAN TERAKHIR SETELAH SUBMIT ---
   useEffect(() => {
@@ -462,8 +465,9 @@ export function TUDashboard() {
   // Statistik
   const stats = [
     { label: "Total Laporan", value: reports.length, icon: Layers, color: "text-blue-600", bg: "bg-blue-100" },
-    { label: "Draft/Menunggu Review", value: reports.filter((r) => r.status === "draft").length, icon: Clock, color: "text-orange-600", bg: "bg-orange-100" },
-    { label: "Perlu Revisi/Dikembalikan", value: reports.filter((r) => r.status === "revision-required" || r.status === "returned").length, icon: AlertTriangle, color: "text-red-600", bg: "bg-red-100" },
+    { label: "Draft", value: reports.filter((r) => r.status === "draft" || r.status === "pending-approval-tu").length, icon: Clock, color: "text-orange-600", bg: "bg-orange-100" },
+    { label: "Diteruskan ke Koordinator", value: reports.filter((r) => r.status === "forwarded-to-coordinator" || r.status === "in-progress" || r.status === "revision-required" || r.status === "returned").length, icon: Send, color: "text-purple-600", bg: "bg-purple-100" },
+    { label: "Dalam Proses", value: reports.filter((r) => r.status === "in-progress").length, icon: FileText, color: "text-indigo-600", bg: "bg-indigo-100" },
     { label: "Selesai", value: reports.filter((r) => r.status === "completed").length, icon: CheckCircle, color: "text-green-600", bg: "bg-green-100" },
   ];
 
@@ -574,9 +578,9 @@ export function TUDashboard() {
             color: COORD_AVATAR_COLORS[idx % COORD_AVATAR_COLORS.length],
             totalLaporan: myReports.length,
             perluTindakan: myReports.filter(s => s === 'forwarded-to-coordinator').length,
-            menungguReview: myReports.filter(s => s === 'pending-approval-tu' || s === 'pending-approval-koordinator').length,
+            menungguReview: myReports.filter(s => s === 'pending-approval-koordinator').length,
             sedangRevisi: myReports.filter(s => s === 'revision-required' || s === 'returned').length,
-            selesai: myReports.filter(s => s === 'completed').length,
+            selesai: myReports.filter(s => s === 'completed' || s === 'pending-approval-tu').length,
           };
         });
 
@@ -613,7 +617,7 @@ export function TUDashboard() {
       </div>
 
       {/* Statistik Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         {stats.map((stat, index) => (
           <div key={index} className="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 transition-all hover:ring-2 hover:ring-blue-100">
             <div className="flex items-start justify-between">
@@ -633,22 +637,20 @@ export function TUDashboard() {
       <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-1.5 flex gap-1">
         <button
           onClick={() => setActiveTab('laporan')}
-          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-            activeTab === 'laporan'
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'laporan'
               ? 'bg-blue-600 text-white shadow-lg'
               : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-          }`}
+            }`}
         >
           <FileText className="w-4 h-4" />
           Daftar Laporan Masuk
         </button>
         <button
           onClick={() => setActiveTab('statistik')}
-          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${
-            activeTab === 'statistik'
+          className={`flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-200 ${activeTab === 'statistik'
               ? 'bg-indigo-600 text-white shadow-lg'
               : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-          }`}
+            }`}
         >
           <PieChartIcon className="w-4 h-4" />
           Statistik Koordinator
@@ -658,243 +660,243 @@ export function TUDashboard() {
       {/* === TAB CONTENT: STATISTIK KOORDINATOR === */}
       {activeTab === 'statistik' && (
         <div className="space-y-8">
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-        <div className="p-6 border-b border-gray-100">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-indigo-100 rounded-xl shadow-md">
-                <PieChartIcon className="w-6 h-6 text-indigo-600" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">Distribusi Laporan per Koordinator</h2>
-                <p className="text-sm text-gray-500 mt-0.5">Statistik berdasarkan triwulan dan tahun</p>
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-indigo-100 rounded-xl shadow-md">
+                    <PieChartIcon className="w-6 h-6 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-gray-900">Distribusi Laporan per Koordinator</h2>
+                    <p className="text-sm text-gray-500 mt-0.5">Statistik berdasarkan triwulan dan tahun</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <select
+                    value={selectedTriwulan}
+                    onChange={(e) => setSelectedTriwulan(Number(e.target.value))}
+                    className="border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-sm font-medium"
+                  >
+                    <option value={1}>Triwulan 1 (Jan-Mar)</option>
+                    <option value={2}>Triwulan 2 (Apr-Jun)</option>
+                    <option value={3}>Triwulan 3 (Jul-Sep)</option>
+                    <option value={4}>Triwulan 4 (Okt-Des)</option>
+                  </select>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    className="border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-sm font-medium"
+                  >
+                    {[2024, 2025, 2026, 2027].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <select
-                value={selectedTriwulan}
-                onChange={(e) => setSelectedTriwulan(Number(e.target.value))}
-                className="border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-sm font-medium"
-              >
-                <option value={1}>Triwulan 1 (Jan-Mar)</option>
-                <option value={2}>Triwulan 2 (Apr-Jun)</option>
-                <option value={3}>Triwulan 3 (Jul-Sep)</option>
-                <option value={4}>Triwulan 4 (Okt-Des)</option>
-              </select>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white text-sm font-medium"
-              >
-                {[2024, 2025, 2026, 2027].map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
+
+            <div className="p-6">
+              {isLoadingChart ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                  <span className="ml-3 text-gray-500 font-medium">Memuat data triwulan...</span>
+                </div>
+              ) : triwulanData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+                  <BarChart3 className="w-14 h-14 mb-4 text-gray-300" />
+                  <p className="text-lg font-medium text-gray-500">Tidak Ada Data</p>
+                  <p className="text-sm text-gray-400 mt-1">Belum ada laporan di Triwulan {selectedTriwulan} Tahun {selectedYear}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                  {/* Donut Chart */}
+                  <div className="relative">
+                    <ResponsiveContainer width="100%" height={350}>
+                      <PieChart>
+                        <Pie
+                          data={triwulanData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={80}
+                          outerRadius={140}
+                          paddingAngle={3}
+                          dataKey="value"
+                          stroke="#fff"
+                          strokeWidth={3}
+                          label={({ percentage }) => `${percentage}%`}
+                        >
+                          {triwulanData.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number, name: string) => [`${value} Laporan`, name]}
+                          contentStyle={{
+                            borderRadius: '12px',
+                            border: '1px solid #e5e7eb',
+                            boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+                            padding: '10px 16px',
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    {/* Center Label */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-sm text-gray-500 font-medium">Triwulan {selectedTriwulan}</span>
+                      <span className="text-lg font-extrabold text-gray-900 uppercase tracking-wide">BIRO SDMO</span>
+                    </div>
+                  </div>
+
+                  {/* Legend + Summary */}
+                  <div className="space-y-5">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Layers className="w-4 h-4 text-blue-600" />
+                          <span className="text-xs font-semibold text-blue-600 uppercase">Total Laporan</span>
+                        </div>
+                        <p className="text-3xl font-extrabold text-gray-900">{triwulanTotalReports}</p>
+                      </div>
+                      <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-4 border border-orange-100">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Users className="w-4 h-4 text-orange-600" />
+                          <span className="text-xs font-semibold text-orange-600 uppercase">Multi Koordinator</span>
+                        </div>
+                        <p className="text-3xl font-extrabold text-gray-900">{multiCoordinatorCount}</p>
+                        <p className="text-xs text-gray-500 mt-1">ditujukan ke &gt;1 koordinator</p>
+                      </div>
+                    </div>
+
+                    {/* Coordinator Breakdown */}
+                    <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
+                      <h4 className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4 text-indigo-500" /> Rincian per Koordinator
+                      </h4>
+                      <div className="space-y-3">
+                        {triwulanData.map((item, index) => (
+                          <div key={item.name} className="flex items-center justify-between group">
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="w-4 h-4 rounded-full shadow-sm flex-shrink-0"
+                                style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }}
+                              />
+                              <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900 transition-colors">{item.name}</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-bold text-gray-900">{item.value}</span>
+                              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600 min-w-[48px] text-center">
+                                {item.percentage}%
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {multiCoordinatorCount > 0 && (
+                      <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                        <p className="text-sm text-amber-800 font-medium">
+                          <span className="font-bold">{multiCoordinatorCount} dari {triwulanTotalReports}</span> laporan ditujukan kepada lebih dari 1 koordinator
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        </div>
 
-        <div className="p-6">
-          {isLoadingChart ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-              <span className="ml-3 text-gray-500 font-medium">Memuat data triwulan...</span>
-            </div>
-          ) : triwulanData.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-              <BarChart3 className="w-14 h-14 mb-4 text-gray-300" />
-              <p className="text-lg font-medium text-gray-500">Tidak Ada Data</p>
-              <p className="text-sm text-gray-400 mt-1">Belum ada laporan di Triwulan {selectedTriwulan} Tahun {selectedYear}</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
-              {/* Donut Chart */}
-              <div className="relative">
-                <ResponsiveContainer width="100%" height={350}>
-                  <PieChart>
-                    <Pie
-                      data={triwulanData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={80}
-                      outerRadius={140}
-                      paddingAngle={3}
-                      dataKey="value"
-                      stroke="#fff"
-                      strokeWidth={3}
-                      label={({ percentage }) => `${percentage}%`}
-                    >
-                      {triwulanData.map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={DONUT_COLORS[index % DONUT_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value: number, name: string) => [`${value} Laporan`, name]}
-                      contentStyle={{
-                        borderRadius: '12px',
-                        border: '1px solid #e5e7eb',
-                        boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
-                        padding: '10px 16px',
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                {/* Center Label */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-sm text-gray-500 font-medium">Triwulan {selectedTriwulan}</span>
-                  <span className="text-lg font-extrabold text-gray-900 uppercase tracking-wide">BIRO SDMO</span>
+          {/* === DETAIL DASHBOARD PER KOORDINATOR === */}
+          {coordinatorDetails.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-100 rounded-xl shadow-sm">
+                  <Users className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">Dashboard per Koordinator</h2>
+                  <p className="text-sm text-gray-500">Detail statistik laporan masing-masing koordinator di Triwulan {selectedTriwulan} Tahun {selectedYear}</p>
                 </div>
               </div>
-
-              {/* Legend + Summary */}
-              <div className="space-y-5">
-                {/* Summary Cards */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-100">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Layers className="w-4 h-4 text-blue-600" />
-                      <span className="text-xs font-semibold text-blue-600 uppercase">Total Laporan</span>
-                    </div>
-                    <p className="text-3xl font-extrabold text-gray-900">{triwulanTotalReports}</p>
-                  </div>
-                  <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-xl p-4 border border-orange-100">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Users className="w-4 h-4 text-orange-600" />
-                      <span className="text-xs font-semibold text-orange-600 uppercase">Multi Koordinator</span>
-                    </div>
-                    <p className="text-3xl font-extrabold text-gray-900">{multiCoordinatorCount}</p>
-                    <p className="text-xs text-gray-500 mt-1">ditujukan ke &gt;1 koordinator</p>
-                  </div>
-                </div>
-
-                {/* Coordinator Breakdown */}
-                <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-                  <h4 className="text-sm font-bold text-gray-700 mb-4 flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-indigo-500" /> Rincian per Koordinator
-                  </h4>
-                  <div className="space-y-3">
-                    {triwulanData.map((item, index) => (
-                      <div key={item.name} className="flex items-center justify-between group">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-4 h-4 rounded-full shadow-sm flex-shrink-0"
-                            style={{ backgroundColor: DONUT_COLORS[index % DONUT_COLORS.length] }}
-                          />
-                          <span className="text-sm font-medium text-gray-700 group-hover:text-gray-900 transition-colors">{item.name}</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                {coordinatorDetails.map((coord) => (
+                  <div key={coord.id} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden hover:shadow-xl transition-shadow">
+                    {/* Header Koordinator */}
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+                      <div>
+                        <h3 className="text-sm font-bold text-gray-800">Dashboard Koordinator</h3>
+                        <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Triwulan {selectedTriwulan}, {selectedYear}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <p className="text-xs font-semibold text-gray-700">{coord.name}</p>
+                          <p className="text-[10px] text-green-600 font-medium flex items-center justify-end gap-1">
+                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span> Online
+                          </p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-bold text-gray-900">{item.value}</span>
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600 min-w-[48px] text-center">
-                            {item.percentage}%
-                          </span>
+                        <div className={`w-9 h-9 ${coord.color} rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md`}>
+                          {coord.initial}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
 
-                {multiCoordinatorCount > 0 && (
-                  <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                    <p className="text-sm text-amber-800 font-medium">
-                      <span className="font-bold">{multiCoordinatorCount} dari {triwulanTotalReports}</span> laporan ditujukan kepada lebih dari 1 koordinator
-                    </p>
+                    {/* Stats Grid */}
+                    <div className="p-4 grid grid-cols-3 gap-2">
+                      {/* Total Laporan */}
+                      <div className="bg-blue-50 rounded-xl p-3 text-center border border-blue-100">
+                        <div className="mx-auto w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center mb-2">
+                          <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        </div>
+                        <p className="text-xl font-extrabold text-gray-900">{coord.totalLaporan}</p>
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Total Laporan</p>
+                      </div>
+
+                      {/* Perlu Tindakan */}
+                      <div className="bg-purple-50 rounded-xl p-3 text-center border border-purple-100">
+                        <div className="mx-auto w-7 h-7 bg-purple-100 rounded-lg flex items-center justify-center mb-2">
+                          <AlertTriangle className="w-3.5 h-3.5 text-purple-600" />
+                        </div>
+                        <p className="text-xl font-extrabold text-gray-900">{coord.perluTindakan}</p>
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Perlu Tindakan</p>
+                      </div>
+
+                      {/* Menunggu Review */}
+                      <div className="bg-cyan-50 rounded-xl p-3 text-center border border-cyan-100">
+                        <div className="mx-auto w-7 h-7 bg-cyan-100 rounded-lg flex items-center justify-center mb-2">
+                          <Eye className="w-3.5 h-3.5 text-cyan-600" />
+                        </div>
+                        <p className="text-xl font-extrabold text-gray-900">{coord.menungguReview}</p>
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Menunggu Review</p>
+                      </div>
+
+                      {/* Sedang Revisi */}
+                      <div className="bg-red-50 rounded-xl p-3 text-center border border-red-100 col-span-1">
+                        <div className="mx-auto w-7 h-7 bg-red-100 rounded-lg flex items-center justify-center mb-2">
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                        </div>
+                        <p className="text-xl font-extrabold text-gray-900">{coord.sedangRevisi}</p>
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Sedang Revisi</p>
+                      </div>
+
+                      {/* Selesai */}
+                      <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100 col-span-2">
+                        <div className="mx-auto w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center mb-2">
+                          <CheckCircle className="w-3.5 h-3.5 text-green-600" />
+                        </div>
+                        <p className="text-xl font-extrabold text-gray-900">{coord.selesai}</p>
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Selesai</p>
+                      </div>
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* === DETAIL DASHBOARD PER KOORDINATOR === */}
-      {coordinatorDetails.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-blue-100 rounded-xl shadow-sm">
-              <Users className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">Dashboard per Koordinator</h2>
-              <p className="text-sm text-gray-500">Detail statistik laporan masing-masing koordinator di Triwulan {selectedTriwulan} Tahun {selectedYear}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-            {coordinatorDetails.map((coord) => (
-              <div key={coord.id} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden hover:shadow-xl transition-shadow">
-                {/* Header Koordinator */}
-                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-800">Dashboard Koordinator</h3>
-                    <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      Triwulan {selectedTriwulan}, {selectedYear}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="text-right">
-                      <p className="text-xs font-semibold text-gray-700">{coord.name}</p>
-                      <p className="text-[10px] text-green-600 font-medium flex items-center justify-end gap-1">
-                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span> Online
-                      </p>
-                    </div>
-                    <div className={`w-9 h-9 ${coord.color} rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md`}>
-                      {coord.initial}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats Grid */}
-                <div className="p-4 grid grid-cols-3 gap-2">
-                  {/* Total Laporan */}
-                  <div className="bg-blue-50 rounded-xl p-3 text-center border border-blue-100">
-                    <div className="mx-auto w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center mb-2">
-                      <FileText className="w-3.5 h-3.5 text-blue-600" />
-                    </div>
-                    <p className="text-xl font-extrabold text-gray-900">{coord.totalLaporan}</p>
-                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Total Laporan</p>
-                  </div>
-
-                  {/* Perlu Tindakan */}
-                  <div className="bg-purple-50 rounded-xl p-3 text-center border border-purple-100">
-                    <div className="mx-auto w-7 h-7 bg-purple-100 rounded-lg flex items-center justify-center mb-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-purple-600" />
-                    </div>
-                    <p className="text-xl font-extrabold text-gray-900">{coord.perluTindakan}</p>
-                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Perlu Tindakan</p>
-                  </div>
-
-                  {/* Menunggu Review */}
-                  <div className="bg-cyan-50 rounded-xl p-3 text-center border border-cyan-100">
-                    <div className="mx-auto w-7 h-7 bg-cyan-100 rounded-lg flex items-center justify-center mb-2">
-                      <Eye className="w-3.5 h-3.5 text-cyan-600" />
-                    </div>
-                    <p className="text-xl font-extrabold text-gray-900">{coord.menungguReview}</p>
-                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Menunggu Review</p>
-                  </div>
-
-                  {/* Sedang Revisi */}
-                  <div className="bg-red-50 rounded-xl p-3 text-center border border-red-100 col-span-1">
-                    <div className="mx-auto w-7 h-7 bg-red-100 rounded-lg flex items-center justify-center mb-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
-                    </div>
-                    <p className="text-xl font-extrabold text-gray-900">{coord.sedangRevisi}</p>
-                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Sedang Revisi</p>
-                  </div>
-
-                  {/* Selesai */}
-                  <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100 col-span-2">
-                    <div className="mx-auto w-7 h-7 bg-green-100 rounded-lg flex items-center justify-center mb-2">
-                      <CheckCircle className="w-3.5 h-3.5 text-green-600" />
-                    </div>
-                    <p className="text-xl font-extrabold text-gray-900">{coord.selesai}</p>
-                    <p className="text-[10px] text-gray-500 font-medium uppercase mt-1">Selesai</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
         </div>
       )}
 
@@ -902,184 +904,195 @@ export function TUDashboard() {
       {activeTab === 'laporan' && (
         <div className="space-y-6">
 
-      {/* Tabel Laporan */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
-        <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between items-center">
-          <h2 className="text-xl font-bold text-gray-800">Daftar Laporan Masuk</h2>
-          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Cari No. Surat, Hal, Layanan..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
-              />
+          {/* Tabel Laporan */}
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row gap-4 justify-between items-center">
+              <h2 className="text-xl font-bold text-gray-800">Daftar Laporan Masuk</h2>
+              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    type="text"
+                    placeholder="Cari No. Surat, Hal, Layanan..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Filter className="text-gray-400 w-5 h-5 hidden sm:block" />
+                  <select
+                    value={serviceFilter}
+                    onChange={(e) => setServiceFilter(e.target.value)}
+                    className="border border-gray-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm"
+                  >
+                    <option value="">Semua Layanan</option>
+                    {allServiceDetails.map((detail) => (
+                      <option key={detail} value={detail}>{detail}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="border border-gray-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm"
+                  >
+                    <option value="">Semua Status</option>
+                    <option value="draft">Draft</option>
+                    <option value="forwarded-to-coordinator">Diteruskan ke Koordinator</option>
+                    <option value="in-progress">Dalam Proses</option>
+                    <option value="completed">Selesai</option>
+                  </select>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Filter className="text-gray-400 w-5 h-5 hidden sm:block" />
-              <select
-                value={serviceFilter}
-                onChange={(e) => setServiceFilter(e.target.value)}
-                className="border border-gray-300 rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-sm"
-              >
-                <option value="">Semua Layanan</option>
-                {allServiceDetails.map((detail) => (
-                  <option key={detail} value={detail}>{detail}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left">
-            <thead>
-              <tr className="bg-gray-50 text-gray-600 text-xs font-semibold uppercase tracking-wider border-b border-gray-200">
-                <th className="px-6 py-3 w-16 text-center">No</th>
-                <th className="px-6 py-3">Layanan</th>
-                <th className="px-6 py-3">Agenda</th>
-                <th className="px-6 py-3">No. Surat</th>
-                <th className="px-6 py-3">Hal</th>
-                <th className="px-6 py-3">Tgl. Masuk</th>
-                <th className="px-6 py-3">Status</th>
-                <th className="px-6 py-3 text-right w-20">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {paginatedReports.length > 0 ? (
-                paginatedReports.map((report, index) => {
-                  const displayLayanan = report.sub_layanan || report.layanan;
-                  const isSubLayanan = (report.sub_layanan) && displayLayanan !== report.layanan;
-                  const absoluteIndex = startIndex + index + 1;
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-600 text-xs font-semibold uppercase tracking-wider border-b border-gray-200">
+                    <th className="px-6 py-3 w-16 text-center">No</th>
+                    <th className="px-6 py-3">Layanan</th>
+                    <th className="px-6 py-3">Agenda</th>
+                    <th className="px-6 py-3">No. Surat</th>
+                    <th className="px-6 py-3">Hal</th>
+                    <th className="px-6 py-3">Tgl. Masuk</th>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3 text-right w-20">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {paginatedReports.length > 0 ? (
+                    paginatedReports.map((report, index) => {
+                      const displayLayanan = report.sub_layanan || report.layanan;
+                      const isSubLayanan = (report.sub_layanan) && displayLayanan !== report.layanan;
+                      const absoluteIndex = startIndex + index + 1;
 
-                  return (
-                    <tr key={report.id} className="hover:bg-blue-50 transition-colors group text-sm">
-                      <td className="px-6 py-4 text-center text-gray-500 font-medium">{absoluteIndex}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-gray-800">{displayLayanan}</span>
-                          {isSubLayanan && <span className="text-xs text-gray-400 mt-0.5">{report.layanan}</span>}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-gray-600 font-medium">{report.no_agenda || "-"}</td>
-                      <td className="px-6 py-4 text-gray-600 font-mono">{report.no_surat}</td>
-                      <td className="px-6 py-4 text-gray-900 font-medium max-w-xs truncate" title={report.hal}>{report.hal}</td>
-                      <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
-                        {new Date(report.created_at).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(report.status)}`}>
-                          {statusMap[report.status] || report.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="relative inline-block text-left">
-                          <button onClick={() => setOpenActionMenu(openActionMenu === report.id ? null : report.id)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-700">
-                            <MoreHorizontal className="w-5 h-5" />
-                          </button>
-                          {openActionMenu === report.id && (
-                            <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-2xl z-50 border border-gray-100 transform transition-all duration-200 ease-out origin-top-right">
-                              <div className="py-1">
-                                <button onClick={() => { setViewingReport(report); setOpenActionMenu(null); }} className="w-full flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
-                                  <Eye className="w-4 h-4 mr-3" /> Lihat Detail
-                                </button>
-                                {(report.status === 'draft' || report.status === 'revision-required' || report.status === 'returned') && (
-                                  <>
-                                    <button onClick={() => handleEditClick(report)} className="w-full flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
-                                      <Edit className="w-4 h-4 mr-3" /> Edit Laporan
-                                    </button>
-                                    <button onClick={() => { setForwardingReport(report); setShowForwardForm(true); setOpenActionMenu(null); }} className="w-full flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
-                                      <Send className="w-4 h-4 mr-3" /> Teruskan ke Koordinator
-                                    </button>
-                                    <button onClick={() => handleDeleteClick(report.id)} className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100">
-                                      <Trash2 className="w-4 h-4 mr-3" /> Hapus Laporan
-                                    </button>
-                                  </>
-                                )}
-                                {report.status === 'forwarded-to-coordinator' && (
-                                  <>
-                                    <button
-                                      onClick={() => handlePullBackReport(report, 'draft')}
-                                      disabled={pullingBackId === report.id}
-                                      className="w-full flex items-center px-4 py-2.5 text-sm text-orange-700 hover:bg-orange-50 transition-colors border-t border-gray-100"
-                                    >
-                                      {pullingBackId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Undo2 className="w-4 h-4 mr-3" />} Tarik Kembali ke Draft
-                                    </button>
-                                    <button
-                                      onClick={() => handlePullBackReport(report, 'delete')}
-                                      disabled={pullingBackId === report.id}
-                                      className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                                    >
-                                      {pullingBackId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Trash2 className="w-4 h-4 mr-3" />} Hapus Laporan
-                                    </button>
-                                  </>
-                                )}
-                                {report.status === 'pending-approval-tu' && (
-                                  <button onClick={() => handleFinalizeReport(report)} disabled={finalizingId === report.id} className="w-full flex items-center px-4 py-2.5 text-sm text-green-700 hover:bg-green-50 transition-colors border-t border-gray-100">
-                                    {finalizingId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Archive className="w-4 h-4 mr-3" />} Selesaikan & Arsipkan
-                                  </button>
-                                )}
-                                {report.status === 'completed' && (
-                                  <button
-                                    onClick={() => handleDeleteClick(report.id)}
-                                    className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
-                                  >
-                                    <Trash2 className="w-4 h-4 mr-3" /> Hapus Laporan
-                                  </button>
-                                )}
-                              </div>
+                      return (
+                        <tr key={report.id} className="hover:bg-blue-50 transition-colors group text-sm">
+                          <td className="px-6 py-4 text-center text-gray-500 font-medium">{absoluteIndex}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-gray-800">{displayLayanan}</span>
+                              {isSubLayanan && <span className="text-xs text-gray-400 mt-0.5">{report.layanan}</span>}
                             </div>
-                          )}
+                          </td>
+                          <td className="px-6 py-4 text-gray-600 font-medium">{report.no_agenda || "-"}</td>
+                          <td className="px-6 py-4 text-gray-600 font-mono">{report.no_surat}</td>
+                          <td className="px-6 py-4 text-gray-900 font-medium max-w-xs truncate" title={report.hal}>{report.hal}</td>
+                          <td className="px-6 py-4 text-gray-500 whitespace-nowrap">
+                            {new Date(report.created_at).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(report.status)}`}>
+                              {statusMap[report.status] || report.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="relative inline-block text-left">
+                              <button onClick={() => setOpenActionMenu(openActionMenu === report.id ? null : report.id)} className="p-2 hover:bg-gray-200 rounded-full transition-colors text-gray-500 hover:text-gray-700">
+                                <MoreHorizontal className="w-5 h-5" />
+                              </button>
+                              {openActionMenu === report.id && (
+                                <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-2xl z-50 border border-gray-100 transform transition-all duration-200 ease-out origin-top-right">
+                                  <div className="py-1">
+                                    <button onClick={() => { setViewingReport(report); setOpenActionMenu(null); }} className="w-full flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                                      <Eye className="w-4 h-4 mr-3" /> Lihat Detail
+                                    </button>
+                                    {(report.status === 'draft' || report.status === 'revision-required' || report.status === 'returned') && (
+                                      <>
+                                        <button onClick={() => handleEditClick(report)} className="w-full flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                                          <Edit className="w-4 h-4 mr-3" /> Edit Laporan
+                                        </button>
+                                        <button onClick={() => { setForwardingReport(report); setShowForwardForm(true); setOpenActionMenu(null); }} className="w-full flex items-center px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors">
+                                          <Send className="w-4 h-4 mr-3" /> Teruskan ke Koordinator
+                                        </button>
+                                        <button onClick={() => handleDeleteClick(report.id)} className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100">
+                                          <Trash2 className="w-4 h-4 mr-3" /> Hapus Laporan
+                                        </button>
+                                      </>
+                                    )}
+                                    {report.status === 'forwarded-to-coordinator' && (
+                                      <>
+                                        <button
+                                          onClick={() => handlePullBackReport(report, 'draft')}
+                                          disabled={pullingBackId === report.id}
+                                          className="w-full flex items-center px-4 py-2.5 text-sm text-orange-700 hover:bg-orange-50 transition-colors border-t border-gray-100"
+                                        >
+                                          {pullingBackId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Undo2 className="w-4 h-4 mr-3" />} Tarik Kembali ke Draft
+                                        </button>
+                                        <button
+                                          onClick={() => handlePullBackReport(report, 'delete')}
+                                          disabled={pullingBackId === report.id}
+                                          className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                        >
+                                          {pullingBackId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Trash2 className="w-4 h-4 mr-3" />} Hapus Laporan
+                                        </button>
+                                      </>
+                                    )}
+                                    {report.status === 'pending-approval-tu' && (
+                                      <button onClick={() => handleFinalizeReport(report)} disabled={finalizingId === report.id} className="w-full flex items-center px-4 py-2.5 text-sm text-green-700 hover:bg-green-50 transition-colors border-t border-gray-100">
+                                        {finalizingId === report.id ? <Loader2 className="w-4 h-4 mr-3 animate-spin" /> : <Archive className="w-4 h-4 mr-3" />} Selesaikan & Arsipkan
+                                      </button>
+                                    )}
+                                    {report.status === 'completed' && (
+                                      <button
+                                        onClick={() => handleDeleteClick(report.id)}
+                                        className="w-full flex items-center px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors border-t border-gray-100"
+                                      >
+                                        <Trash2 className="w-4 h-4 mr-3" /> Hapus Laporan
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-16 text-center">
+                        <div className="flex flex-col items-center justify-center text-gray-400">
+                          <Package className="w-14 h-14 mb-4 text-gray-300" />
+                          <p className="text-xl font-medium text-gray-500">Data Laporan Tidak Ditemukan</p>
+                          <p className="text-sm text-gray-400 mt-1">Coba ubah kata kunci pencarian atau filter layanan.</p>
                         </div>
                       </td>
                     </tr>
-                  )
-                })
-              ) : (
-                <tr>
-                  <td colSpan={8} className="px-6 py-16 text-center">
-                    <div className="flex flex-col items-center justify-center text-gray-400">
-                      <Package className="w-14 h-14 mb-4 text-gray-300" />
-                      <p className="text-xl font-medium text-gray-500">Data Laporan Tidak Ditemukan</p>
-                      <p className="text-sm text-gray-400 mt-1">Coba ubah kata kunci pencarian atau filter layanan.</p>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Kontrol Paginasi */}
-        {totalPages > 1 && (
-          <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
-            <p className="text-sm text-gray-600">
-              Menampilkan {startIndex + 1} sampai {Math.min(startIndex + ITEMS_PER_PAGE, filteredReports.length)} dari {filteredReports.length} laporan
-            </p>
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
-                className="p-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg font-semibold text-sm">
-                Halaman {currentPage} dari {totalPages}
-              </span>
-              <button
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
-                className="p-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+                  )}
+                </tbody>
+              </table>
             </div>
+
+            {/* Kontrol Paginasi */}
+            {totalPages > 1 && (
+              <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
+                <p className="text-sm text-gray-600">
+                  Menampilkan {startIndex + 1} sampai {Math.min(startIndex + ITEMS_PER_PAGE, filteredReports.length)} dari {filteredReports.length} laporan
+                </p>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="p-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-lg font-semibold text-sm">
+                    Halaman {currentPage} dari {totalPages}
+                  </span>
+                  <button
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="p-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
         </div>
       )}
 

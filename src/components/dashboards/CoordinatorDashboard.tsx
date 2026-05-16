@@ -540,6 +540,15 @@ export function CoordinatorDashboard() {
   }
 
   const getStatusInfo = (report: LocalReport) => {
+    // Prioritas 1: Sudah diteruskan ke TU atau selesai final → tampilkan sebagai "Selesai"
+    if (report.status === 'pending-approval-tu') {
+      return { text: 'Selesai (Dikirim ke TU)', value: 'completed', color: 'text-green-600', icon: CheckCircle };
+    }
+    if (report.status === 'completed') {
+      return { text: 'Selesai', value: 'completed', color: 'text-green-600', icon: CheckCircle };
+    }
+
+    // Prioritas 2: Cek task-level status
     if (report.task_assignments?.some(a => a.status === 'revision-required')) {
       return { text: 'Perlu Revisi', value: 'revision-required', color: 'text-red-600', icon: XCircle };
     }
@@ -553,18 +562,16 @@ export function CoordinatorDashboard() {
       return { text: 'Tugas Selesai (Review)', value: 'pending-review-baru', color: 'text-orange-600', icon: CheckCircle };
     }
 
-    if (report.status === 'completed') return { text: 'Selesai', value: 'completed', color: 'text-green-600', icon: CheckCircle };
     if (report.status === 'forwarded-to-coordinator') return { text: 'Perlu Tindakan', value: 'forwarded-to-coordinator', color: 'text-purple-600', icon: Send };
     if (report.status === 'in-progress') return { text: 'Dikerjakan Staff', value: 'in-progress', color: 'text-blue-600', icon: Clock };
     if (report.status === 'pending-approval-koordinator') return { text: 'Review Staff', value: 'pending-approval-koordinator', color: 'text-orange-600', icon: Clock };
-
 
     return { text: report.status, value: report.status, color: 'text-gray-600', icon: AlertTriangle };
   };
 
   const getReportProgress = (report: LocalReport) => {
     if (!report.task_assignments || report.task_assignments.length === 0) {
-      if (report.status === 'completed') return 100;
+      if (report.status === 'completed' || report.status === 'pending-approval-tu') return 100;
       return 0;
     }
     const completedCount = report.task_assignments.filter(
@@ -595,12 +602,6 @@ export function CoordinatorDashboard() {
       const displayStatusValue = getStatusInfo(report).value;
       const matchesStatus = !statusFilter || displayStatusValue === statusFilter;
 
-      // 🛑 FIX: Sembunyikan laporan yang sudah diteruskan ke TU atau Selesai
-      // Agar dashboard koordinator bersih, hanya menampilkan yang perlu dikerjakan.
-      if (report.status === 'pending-approval-tu' || report.status === 'completed') {
-        return false;
-      }
-
       return matchesService && matchesStatus && matchesSearch;
     });
   }, [localReports, serviceFilter, statusFilter, searchQuery]);
@@ -621,12 +622,12 @@ export function CoordinatorDashboard() {
 
   // --- LOGIC STATS ---
   const stats = useMemo(() => {
-    // Stats dihitung dari ALL localReports agar angka "Total" dan "Selesai" tetap terlihat secara global
-    // meskipun di tabel utama disembunyikan.
+    // Stats dihitung dari ALL localReports agar angka "Total" dan "Selesai" tetap terlihat secara global.
+    // "Selesai" mencakup laporan yang sudah diteruskan ke TU (pending-approval-tu) dan yang final (completed).
     return {
       totalLaporan: localReports.length,
       perluTindakan: localReports.filter(r => getStatusInfo(r).value === 'forwarded-to-coordinator').length,
-      selesai: localReports.filter(r => getStatusInfo(r).value === 'completed').length,
+      selesai: localReports.filter(r => r.status === 'pending-approval-tu' || r.status === 'completed').length,
       revisi: localReports.filter(r => getStatusInfo(r).value === 'revision-required').length,
       menungguReview: localReports.filter(r =>
         getStatusInfo(r).value === 'pending-review-revisi' ||
@@ -804,8 +805,13 @@ export function CoordinatorDashboard() {
                             </button>
                           )}
 
+                          {/* TOMBOL UNTUK LAPORAN SELESAI: Hanya lihat detail */}
+                          {status.value === 'completed' && (
+                            <button onClick={() => setSelectedReport(report)} className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors" title="Lihat Detail"><Eye className="w-5 h-5" /></button>
+                          )}
+
                           {/* TOMBOL UMUM */}
-                          {status.value !== 'pending-review-revisi' && status.value !== 'pending-review-baru' && (
+                          {status.value !== 'pending-review-revisi' && status.value !== 'pending-review-baru' && status.value !== 'completed' && (
                             <>
                               <button onClick={() => setSelectedReport(report)} className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors" title="Lihat Detail"><Eye className="w-5 h-5" /></button>
                               <button onClick={() => setRevisionReport(report)} className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-md transition-colors" title="Kembalikan / Revisi"><AlertTriangle className="w-5 h-5" /></button>
