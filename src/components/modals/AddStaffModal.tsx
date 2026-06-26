@@ -44,10 +44,27 @@ export function AddStaffModal({ report, profiles, onClose }) {
           status: 'in-progress',
           notes: notes,
         }))
-        
-        const { error: taskInsertError } = await supabase.from('task_assignments').insert(newAssignmentsData)
-        if (taskInsertError) throw new Error(`Gagal menambah tugas: ${taskInsertError.message}`)
 
+        const selectedStaffNames = profiles.filter(p => selectedStaffIds.includes(p.id)).map(p => p.full_name).join(', ')
+
+        // Gunakan API route untuk bypass RLS
+        const response = await fetch('/api/coordinator-action', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'assign-tasks',
+            reportId: report.id,
+            assignments: newAssignmentsData,
+            staffNames: selectedStaffNames,
+            notes: `Menambahkan staff: ${selectedStaffNames}.`,
+            updateReportStatus: false,
+          }),
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Gagal menambah tugas.');
+
+        // Update report current_holder
         const { error: reportUpdateError } = await supabase
             .from('reports')
             .update({
@@ -56,15 +73,6 @@ export function AddStaffModal({ report, profiles, onClose }) {
             .eq('id', report.id);
 
         if (reportUpdateError) throw new Error(`Gagal mengupdate laporan: ${reportUpdateError.message}`);
-
-        const selectedStaffNames = profiles.filter(p => selectedStaffIds.includes(p.id)).map(p => p.full_name).join(', ')
-        await supabase.from('workflow_history').insert({
-            report_id: report.id,
-            action: 'Staff tambahan ditugaskan',
-            user_id: currentUser?.id,
-            status: 'in-progress',
-            notes: `Menambahkan staff: ${selectedStaffNames}.`,
-        })
 
         toast.success("Staff tambahan berhasil ditugaskan!")
         onClose()

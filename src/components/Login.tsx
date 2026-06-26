@@ -11,11 +11,12 @@ export function Login() {
   const [error, setError] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
-  const [currentTime, setCurrentTime] = useState(new Date())
+  const [currentTime, setCurrentTime] = useState<Date | null>(null)
   const [loading, setLoading] = useState(false)
   const { state, dispatch } = useApp()
 
   useEffect(() => {
+    setCurrentTime(new Date())
     const timer = setInterval(() => {
       setCurrentTime(new Date())
     }, 1000)
@@ -107,6 +108,8 @@ export function Login() {
   }
 
   const getCurrentTime = () => {
+    if (!currentTime) return "Memuat..."
+
     const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
     const months = [
       "Januari",

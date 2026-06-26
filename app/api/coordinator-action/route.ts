@@ -44,6 +44,47 @@ export async function PUT(request: NextRequest) {
     const supabase = createServiceClient()
 
     switch (action) {
+      // --- ASSIGN TASKS TO STAFF ---
+      case "assign-tasks": {
+        const { assignments, staffNames, updateReportStatus } = body
+
+        if (!assignments || assignments.length === 0) {
+          return NextResponse.json({ error: "Tidak ada data tugas untuk disimpan." }, { status: 400 })
+        }
+
+        // Insert task assignments menggunakan service role (bypass RLS)
+        const { error: taskInsertError } = await supabase
+          .from("task_assignments")
+          .insert(assignments)
+
+        if (taskInsertError) {
+          console.error("Error inserting task_assignments:", taskInsertError)
+          throw new Error(`Gagal menyimpan tugas: ${taskInsertError.message}`)
+        }
+
+        // Log workflow history
+        await supabase.from("workflow_history").insert({
+          report_id: reportId,
+          action: "Laporan ditugaskan",
+          user_id: user.id,
+          status: "in-progress",
+          notes: notes || `Ditugaskan kepada: ${staffNames || "staff"}.`,
+        })
+
+        // Update report status jika diminta
+        if (updateReportStatus) {
+          await supabase
+            .from("reports")
+            .update({
+              status: "in-progress",
+              current_holder: user.id,
+            })
+            .eq("id", reportId)
+        }
+
+        return NextResponse.json({ success: true, message: "Tugas berhasil ditugaskan!" })
+      }
+
       // --- APPROVE REVISIONS (Tahap 1: Cyan Review) ---
       case "approve-revisions": {
         if (!taskIds || taskIds.length === 0) {

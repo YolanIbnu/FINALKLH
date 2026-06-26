@@ -128,23 +128,24 @@ export function ReportDetailsModal({ report, profiles, onClose }) {
         notes: notes,
       }));
 
-      const { error: taskInsertError } = await supabase.from('task_assignments').insert(taskAssignmentsData);
-      if (taskInsertError) throw new Error(`Gagal menyimpan tugas: ${taskInsertError.message}`);
-
       const selectedStaffNames = profiles.filter((p: any) => selectedStaffIds.includes(p.id)).map((p: any) => p.full_name).join(', ');
-      await supabase.from('workflow_history').insert({
-        report_id: report.id,
-        action: 'Laporan ditugaskan (Baru)',
-        user_id: currentUser?.id,
-        status: 'in-progress',
-        notes: `Ditugaskan kepada: ${selectedStaffNames}.`,
+
+      // Gunakan API route untuk bypass RLS
+      const response = await fetch('/api/coordinator-action', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'assign-tasks',
+          reportId: report.id,
+          assignments: taskAssignmentsData,
+          staffNames: selectedStaffNames,
+          notes: `Ditugaskan kepada: ${selectedStaffNames}.`,
+          updateReportStatus: true,
+        }),
       });
 
-      // Update status laporan menjadi 'in-progress'
-      await supabase.from('reports').update({
-        status: 'in-progress',
-        current_holder: currentUser.id,
-      }).eq('id', report.id);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Gagal menyimpan tugas.');
 
       toast.success("Tugas berhasil ditugaskan!");
 
