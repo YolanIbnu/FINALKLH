@@ -1138,7 +1138,7 @@ export function TUDashboard() {
                     <h3 className="text-md font-bold text-gray-800 mb-4 border-b pb-2 flex items-center gap-2"><Layers className="w-4 h-4 text-blue-500" /> Detail Dokumen</h3>
                     <div className="space-y-3 text-sm">
                       <DetailItem label="Dari" value={viewingReport.dari} />
-                      <DetailItem label="Tanggal Surat" value={new Date(viewingReport.tanggal_surat).toLocaleDateString('id-ID')} />
+                      <DetailItem label="Tanggal Surat" value={viewingReport.tanggal_surat ? new Date(viewingReport.tanggal_surat).toLocaleDateString('id-ID') : "-"} />
                       <DetailItem label="Tgl. Masuk Sistem" value={new Date(viewingReport.created_at).toLocaleDateString('id-ID')} />
                       <div className="grid grid-cols-2">
                         <div className="text-gray-500">Link Dokumen</div>

@@ -60,10 +60,10 @@ const PROCESS_STEPS = [
 // ==================================================================
 // 2. FUNGSI HELPER
 // ==================================================================
-async function formatApiDataToReport(apiData): Promise<Report> {
+async function formatApiDataToReport(apiData: any): Promise<Report> {
     const history = apiData.workflow_history || [];
 
-    const timeAgo = (dateStr) => {
+    const timeAgo = (dateStr: string) => {
         if (!dateStr) return "-";
         const date = new Date(dateStr);
         const now = new Date();
@@ -103,7 +103,7 @@ async function formatApiDataToReport(apiData): Promise<Report> {
         }
 
         return PROCESS_STEPS.map((def, index) => {
-            const historyItem = history.find(h => h.action === def.id) ||
+            const historyItem = history.find((h: any) => h.action === def.id) ||
                 (index === activeStepIndex && history.length > 0 ? history[history.length - 1] : null);
 
             let stepStatus: 'completed' | 'current' | 'pending' = 'pending';
@@ -140,13 +140,13 @@ async function formatApiDataToReport(apiData): Promise<Report> {
     // Ambil data assignment (staff & notes)
     // Kita filter hanya yang punya 'note' ATAU 'revisionNote'
     const coordinatorNotes: CoordinatorNote[] = (apiData.task_assignments || [])
-        .map(assignment => ({
+        .map((assignment: any) => ({
             staffName: assignment.profiles?.name || 'Staff',
             note: assignment.notes,
             revisionNote: assignment.revision_notes,
             date: assignment.updated_at
         }))
-        .filter(note => note.note || note.revisionNote);
+        .filter((note: CoordinatorNote) => note.note || note.revisionNote);
 
     return {
         no_surat: apiData.no_surat,
@@ -245,7 +245,7 @@ export function PublicTracking() {
             <div className="max-w-4xl mx-auto px-4 -mt-8 relative z-10">
                 {searchState.status === 'success' && searchState.data && <TrackingResult report={searchState.data} />}
                 {searchState.status === 'not_found' && <MessageState type="not_found" />}
-                {searchState.status === 'error' && <MessageState type="error" message={searchState.error} />}
+                {searchState.status === 'error' && <MessageState type="error" message={searchState.error ?? undefined} />}
             </div>
         </div>
     );
@@ -261,7 +261,7 @@ const TrackingResult = ({ report }: { report: Report }) => {
     // 2. SEMUA Catatan (Untuk Timeline - agar tampil 2 staff atau lebih)
     const allCoordinatorNotes = report.coordinatorNotes || [];
 
-    const getStatusColor = (status) => {
+    const getStatusColor = (status: string) => {
         const s = status.toLowerCase();
         if (s.includes('selesai') || s.includes('completed')) return 'bg-emerald-100 text-emerald-800 border-emerald-200';
         if (s.includes('revisi') || s.includes('revision')) return 'bg-red-100 text-red-800 border-red-200';

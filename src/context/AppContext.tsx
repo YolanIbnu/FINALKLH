@@ -26,6 +26,7 @@ type AppAction =
   | { type: "ADD_REPORT"; payload: Report }
   | { type: "UPDATE_REPORT"; payload: Report }
   | { type: "DELETE_REPORT"; payload: string }
+  | { type: "FETCH_REPORTS" }
 // Tipe aksi lain bisa ditambahkan di sini jika perlu
 
 // State Awal
@@ -65,6 +66,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, reports: state.reports.map((r) => (r.id === action.payload.id ? action.payload : r)) }
     case "DELETE_REPORT":
       return { ...state, reports: state.reports.filter((r) => r.id !== action.payload) }
+    case "FETCH_REPORTS":
+      // Trigger re-fetch by updating lastSyncTime; the useEffect watching isAuthenticated handles actual fetch
+      return { ...state, lastSyncTime: new Date().toISOString() }
     default:
       return state
   }
@@ -95,9 +99,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (usersError) console.error("Error fetching users:", usersError)
       else if (usersData) dispatch({ type: "SET_USERS", payload: usersData as User[] })
 
-      const { data: reportsData, error: reportsError } = await supabase.from("reports").select("*, file_attachments(*)").order("created_at", { ascending: false })
-      if (reportsError) console.error("Error fetching reports:", reportsError)
-      else if (reportsData) dispatch({ type: "SET_REPORTS", payload: reportsData as Report[] })
+      // Fetch ALL reports via pagination (Supabase default limit = 1000 rows)
+      const PAGE_SIZE = 1000
+      let allReports: Report[] = []
+      let from = 0
+      let hasMore = true
+
+      while (hasMore) {
+        const { data: batch, error: batchError } = await supabase
+          .from("reports")
+          .select("*, file_attachments(*)")
+          .order("created_at", { ascending: false })
+          .range(from, from + PAGE_SIZE - 1)
+
+        if (batchError) {
+          console.error("Error fetching reports:", batchError)
+          break
+        }
+
+        if (batch) {
+          allReports = allReports.concat(batch as Report[])
+        }
+
+        // If we got fewer rows than PAGE_SIZE, we've reached the end
+        if (!batch || batch.length < PAGE_SIZE) {
+          hasMore = false
+        } else {
+          from += PAGE_SIZE
+        }
+      }
+
+      if (allReports.length > 0) {
+        dispatch({ type: "SET_REPORTS", payload: allReports })
+      }
     }
     fetchInitialData()
 
@@ -130,7 +164,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       supabase.removeChannel(reportChannel)
       supabase.removeChannel(profileChannel)
     }
-  }, [state.isAuthenticated])
+  }, [state.isAuthenticated, state.lastSyncTime])
 
   const contextValue = useMemo(() => ({ state, dispatch }), [state])
 

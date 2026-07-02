@@ -1,3 +1,7 @@
+"use client"
+
+import React, { useState } from "react"
+
 export function LoginForm() {
   const [error, setError] = useState('');
 
@@ -13,7 +17,7 @@ export function LoginForm() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
-          'Content-Type': s 'application/json',
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ username, password }),
       });

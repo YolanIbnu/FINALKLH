@@ -7,7 +7,13 @@ import type { FileAttachment } from "../../types"
 import { useApp } from "../../context/AppContext"
 import { toast, trackingToasts } from "../../../lib/toast"
 
-export function ReportForm({ report, onSubmit, onCancel }) {
+interface ReportFormProps {
+  report?: any;
+  onSubmit: (data: any) => void;
+  onCancel: () => void;
+}
+
+export function ReportForm({ report, onSubmit, onCancel }: ReportFormProps) {
   const { state } = useApp()
   const currentUser = state.currentUser
 
@@ -20,7 +26,22 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     return { category: "", subService: "" };
   };
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    layanan: string;
+    subLayanan: string;
+    linkDocuments: string;
+    noAgenda: string;
+    kelompokAsalSurat: string;
+    agendaSestama: string;
+    noSurat: string;
+    hal: string;
+    dari: string;
+    tanggalAgenda: string;
+    tanggalSurat: string;
+    sifat: string[];
+    derajat: string[];
+    status: string;
+  }>({
     layanan: "",
     subLayanan: "",
     linkDocuments: "",
@@ -80,7 +101,7 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     }
   }, [report]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!currentUser) return;
 
@@ -124,13 +145,13 @@ export function ReportForm({ report, onSubmit, onCancel }) {
     }
   }
 
-  const handleChange = (e) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
     if (name === "layanan") setFormData({ ...formData, layanan: value, subLayanan: "" })
     else setFormData({ ...formData, [name]: value })
   }
 
-  const handleCheckboxChange = (e, field) => {
+  const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'sifat' | 'derajat') => {
     const { value, checked } = e.target
     setFormData((prev) => ({
       ...prev,

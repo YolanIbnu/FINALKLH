@@ -1,9 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createServerClient } from "@/lib/supabase/server"
+import { createClient } from "@/lib/supabase/server"
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const supabase = createServerClient()
+    const supabase = await createClient()
+    const { id } = await params
 
     // Get authenticated user
     const {
@@ -21,7 +22,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const { data: currentAssignment, error: fetchError } = await supabase
       .from("task_assignments")
       .select("*, report:reports(id, no_surat)")
-      .eq("id", params.id)
+      .eq("id", id)
       .single()
 
     if (fetchError || !currentAssignment) {
@@ -70,7 +71,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const { data: updatedAssignment, error: updateError } = await supabase
       .from("task_assignments")
       .update(updateData)
-      .eq("id", params.id)
+      .eq("id", id)
       .select(`
         *,
         report:reports(id, no_surat, hal, layanan),
@@ -104,9 +105,10 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const supabase = createServerClient()
+    const supabase = await createClient()
+    const { id } = await params
 
     // Get authenticated user
     const {
@@ -137,7 +139,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     const { data: assignment, error: fetchError } = await supabase
       .from("task_assignments")
       .select("report_id, staff:profiles!staff_id(name)")
-      .eq("id", params.id)
+      .eq("id", id)
       .single()
 
     if (fetchError || !assignment) {
@@ -145,7 +147,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     }
 
     // Delete task assignment
-    const { error: deleteError } = await supabase.from("task_assignments").delete().eq("id", params.id)
+    const { error: deleteError } = await supabase.from("task_assignments").delete().eq("id", id)
 
     if (deleteError) {
       console.error("Error deleting task assignment:", deleteError)
@@ -158,7 +160,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       action: `Task assignment removed`,
       user_id: user.id,
       status: "unassigned",
-      notes: `Task assignment for ${assignment.staff?.name} was removed`,
+      notes: `Task assignment for ${(assignment.staff as any)?.name || 'staff'} was removed`,
     })
 
     return NextResponse.json({ message: "Task assignment deleted successfully" })

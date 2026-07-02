@@ -33,7 +33,13 @@ const formatDate = (dateString: string | null, includeTime: boolean = true) => {
   }
 };
 
-export function ReportDetailsModal({ report, profiles, onClose }) {
+interface ReportDetailsModalProps {
+  report: any;
+  profiles: any[];
+  onClose: () => void;
+}
+
+export function ReportDetailsModal({ report, profiles, onClose }: ReportDetailsModalProps) {
   const { state } = useApp();
   const { currentUser } = state;
 

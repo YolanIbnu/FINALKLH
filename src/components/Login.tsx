@@ -64,7 +64,7 @@ export function Login() {
 
         const userFromAuth = {
           id: authData.user.id,
-          name: profile.name || authData.user.email.split("@")[0] || "User",
+          name: profile.name || authData.user.email?.split("@")[0] || "User",
           role: profile.role,
           email: authData.user.email,
           // ⚠️ PERINGATAN: Menyimpan password di state (context) sebenarnya tidak disarankan
@@ -79,26 +79,9 @@ export function Login() {
         return
       }
 
-      // ... (kode lookup profile by name) ...
-
-      // (Langsung ke bagian bawah fungsi di mana kebocoran kedua terjadi)
-
-      if (credentials.password !== "123456") {
-        setError("ID atau password salah")
-        return
-      }
-
-      const userFromProfile = {
-        id: profile.id,
-        name: profile.name || "User",
-        role: profile.role,
-        password: credentials.password,
-      }
-
-      // ✅ PERBAIKAN KEDUA: Hapus console.log di bawah ini!
-      // console.log("[v0] Logging in user from profile:", userFromProfile)
-
-      dispatch({ type: "LOGIN", payload: userFromProfile })
+      // Fallback: Auth berhasil tapi profile tidak ditemukan — sudah di-handle di atas
+      // Jika sampai sini, artinya authError terjadi atau user null
+      setError("ID atau password salah")
     } catch (error) {
       console.error("[v0] Login error:", error)
       setError("Terjadi kesalahan saat login")

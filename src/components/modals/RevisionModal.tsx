@@ -5,7 +5,13 @@ import { useApp } from "../../context/AppContext"
 import { toast } from "../../../lib/toast"
 import { X, AlertTriangle } from "lucide-react"
 
-export function RevisionModal({ report, profiles, onClose }) {
+interface RevisionModalProps {
+  report: any;
+  profiles: any[];
+  onClose: () => void;
+}
+
+export function RevisionModal({ report, profiles, onClose }: RevisionModalProps) {
   const { state } = useApp()
   const { currentUser } = state
 
@@ -13,11 +19,11 @@ export function RevisionModal({ report, profiles, onClose }) {
   const [revisionNotes, setRevisionNotes] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const getStaffName = (staffId) => {
+  const getStaffName = (staffId: string) => {
     if (!profiles || profiles.length === 0) {
       return 'Memuat nama...';
     }
-    const profile = profiles.find(p => p.id === staffId);
+    const profile = profiles.find((p: any) => p.id === staffId);
     return profile?.full_name || 'Nama Staff Tidak Ditemukan';
   };
 
@@ -52,7 +58,7 @@ export function RevisionModal({ report, profiles, onClose }) {
 
     } catch (error) {
       console.error("Error submitting revision:", error)
-      toast.error(error.message || "Gagal mengirim revisi.")
+      toast.error((error as Error).message || "Gagal mengirim revisi.")
     } finally {
       setIsSubmitting(false)
     }
@@ -73,7 +79,7 @@ export function RevisionModal({ report, profiles, onClose }) {
             <label className="block text-sm font-medium text-gray-700 mb-2">Pilih Staff untuk Direvisi:</label>
             <select value={selectedAssignmentId} onChange={(e) => setSelectedAssignmentId(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg">
               <option value="">-- Pilih Staff --</option>
-              {assignedStaffList.map((assignment) => (
+              {assignedStaffList.map((assignment: any) => (
                 <option key={assignment.id} value={assignment.id}>
                   {getStaffName(assignment.staff_id)}
                 </option>

@@ -673,13 +673,13 @@ export function CoordinatorDashboard() {
             </button>
             <div className="flex items-center gap-3 border-l pl-4">
               <div className="text-right hidden sm:block">
-                <div className="text-sm font-semibold text-gray-900">{currentUser.name || currentUser.full_name || "Koordinator"}</div>
+                <div className="text-sm font-semibold text-gray-900">{currentUser?.name || currentUser?.full_name || "Koordinator"}</div>
                 <div className="text-xs text-green-600 font-medium flex items-center justify-end gap-1">
                   <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div> Online
                 </div>
               </div>
               <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-base shadow-lg">
-                {(currentUser.name || currentUser.full_name)?.charAt(0).toUpperCase() || "K"}
+                {(currentUser?.name || currentUser?.full_name)?.charAt(0).toUpperCase() || "K"}
               </div>
             </div>
           </div>

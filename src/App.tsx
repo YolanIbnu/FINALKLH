@@ -82,9 +82,7 @@ function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-pink-50">
       <Header
-        userName={state.currentUser?.name || "User"}
         userRole={state.currentUser?.role || "Role"}
-        userTitle={state.currentUser?.role || "Title"}
       />
 
       {state.isAuthenticated && (

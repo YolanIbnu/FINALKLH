@@ -80,6 +80,7 @@
     "typescript-eslint": "latest",
     "vaul": "latest",
     "vite": "^7.2.2",
+    "xlsx": "^0.18.5",
     "yaml": "latest",
     "zod": "^3.24.1"
   },

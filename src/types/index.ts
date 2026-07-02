@@ -4,12 +4,13 @@ export interface User {
   user_id?: string;      // Foreign Key ke tabel 'auth.users' (UUID)
   name: string;
   full_name?: string;    // Ditambahkan untuk konsistensi
+  email?: string;
   password?: string;     // Sebaiknya tidak disimpan di state client
   role: "Admin" | "TU" | "Koordinator" | "Staff";
 }
 
 // 🔥 PERBAIKAN: Menambahkan 'forwarded-to-coordinator' dan 'returned'
-export type ReportStatus = "draft" | "forwarded-to-coordinator" | "in-progress" | "completed" | "revision-required" | "returned";
+export type ReportStatus = "draft" | "forwarded-to-coordinator" | "in-progress" | "completed" | "revision-required" | "returned" | "pending-approval-tu" | "pending-approval-koordinator";
 
 // Tipe untuk lampiran file
 export interface FileAttachment {
@@ -54,6 +55,25 @@ export interface Report {
   task_assignments?: TaskAssignment[];
   document_verification?: Record<string, string>;
   current_holder?: string;
+  // Properties tambahan yang digunakan di berbagai komponen
+  no_agenda?: string;
+  dari?: string;
+  tanggal_surat?: string;
+  tanggal_agenda?: string;
+  trackingNumber?: string;
+  kelompok_asal_surat?: string;
+  agenda_sestama?: string;
+  sifat?: string[];
+  derajat?: string[];
+  file_attachments?: any[];
+  workflow_history?: Array<{
+    id: string;
+    action: string;
+    notes?: string;
+    user: string;
+    timestamp: string;
+    status: string;
+  }>;
 }
 
 // --- MODIFIKASI: Daftar Layanan Utama ---

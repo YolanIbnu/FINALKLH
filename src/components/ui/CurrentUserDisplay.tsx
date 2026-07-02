@@ -1,13 +1,14 @@
 "use client"
 
-import { useContext } from "react"
-import { AppContext } from "@/src/context/AppContext"
+import { useApp } from "@/src/context/AppContext"
 import { Card, CardContent } from "@/components/ui/card"
 import { User, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export function CurrentUserDisplay() {
-  const { currentUser, logout } = useContext(AppContext)
+  const { state, dispatch } = useApp()
+  const { currentUser } = state
+  const logout = () => dispatch({ type: "LOGOUT" })
 
   if (!currentUser) return null
 
